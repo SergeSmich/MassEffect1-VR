@@ -1,0 +1,13 @@
+bin/
+obj/
+*.user
+.vs/
+*.pdb
+*.iobj
+*.ipdb
+
+# Local safety snapshots (redundant with git history; contain binaries)
+SOURCE_BACKUPS/
+live-backups/
+zips/
+*.bmp
