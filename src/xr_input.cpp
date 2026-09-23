@@ -116,6 +116,34 @@ constexpr ActionDef kActions[A_COUNT] = {
 static_assert(A_COUNT == (int)(sizeof(kActions) / sizeof(kActions[0])), "kActions table matches the enum");
 
 constexpr const char* kSimpleControllerProfile = "/interaction_profiles/khr/simple_controller";
+constexpr const char* kOculusTouchProfile = "/interaction_profiles/oculus/touch_controller";
+
+struct BindingDef
+{
+    ActionId action;
+    const char* path;
+};
+
+// Quest 2 Touch controllers as exposed by the Oculus/Virtual Desktop OpenXR
+// profile. The user/hand prefix is part of the binding path; unlike the old
+// draft's invented /user/input/.../gamepad/... paths, these are official 1.0
+// interaction-profile paths.
+constexpr BindingDef kOculusTouchBindings[] = {
+    { A_RIGHT_POSE, "/user/hand/right/input/grip/pose" },
+    { A_LEFT_POSE,  "/user/hand/left/input/grip/pose" },
+    { A_R_TRIG,    "/user/hand/right/input/trigger/value" },
+    { A_R_SQZ,     "/user/hand/right/input/squeeze/value" },
+    { A_R_STICK,   "/user/hand/right/input/thumbstick" },
+    { A_R_STICKCLK,"/user/hand/right/input/thumbstick/click" },
+    { A_R_A,       "/user/hand/right/input/a/click" },
+    { A_R_B,       "/user/hand/right/input/b/click" },
+    { A_L_TRIG,    "/user/hand/left/input/trigger/value" },
+    { A_L_SQZ,     "/user/hand/left/input/squeeze/value" },
+    { A_L_STICK,   "/user/hand/left/input/thumbstick" },
+    { A_L_STICKCLK,"/user/hand/left/input/thumbstick/click" },
+    { A_L_X,       "/user/hand/left/input/x/click" },
+    { A_L_Y,       "/user/hand/left/input/y/click" },
+};
 
 // ---- loader functions (resolved by Init through the session's getProc) --------
 struct Fn
@@ -306,6 +334,52 @@ void FillHand(int base, HandFrame& h) noexcept
     ReadBool(g_actions[base + 12], &h.dpadRight);
 }
 
+bool SuggestProfileBindings(XrInstance instance, const char* profileName,
+                            const BindingDef* defs, uint32_t count,
+                            const char* label) noexcept
+{
+    XrPath profile = 0;
+    XrResult r = g_fn.stringToPath(instance, profileName, &profile);
+    if (!XrSucceeded(r))
+    {
+        LogLine(std::string("[XRINPUT] optional profile '") + label +
+                "' path failed result=" + std::to_string(r));
+        return false;
+    }
+
+    XrActionSuggestedBinding bindings[A_COUNT] = {};
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        XrPath path = 0;
+        r = g_fn.stringToPath(instance, defs[i].path, &path);
+        if (!XrSucceeded(r))
+        {
+            LogLine(std::string("[XRINPUT] optional profile '") + label +
+                    "' binding path failed: " + defs[i].path +
+                    " result=" + std::to_string(r));
+            return false;
+        }
+        bindings[i].action = g_actions[defs[i].action];
+        bindings[i].binding = path;
+    }
+
+    XrInteractionProfileSuggestedBinding sb = {};
+    sb.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING_VALUE;
+    sb.interactionProfile = profile;
+    sb.countSuggestedBindings = count;
+    sb.suggestedBindings = bindings;
+    r = g_fn.suggestBindings(instance, &sb);
+    if (!XrSucceeded(r))
+    {
+        LogLine(std::string("[XRINPUT] optional profile '") + label +
+                "' bindings unavailable result=" + std::to_string(r));
+        return false;
+    }
+    LogLine(std::string("[XRINPUT] optional profile '") + label +
+            "' bindings accepted (" + std::to_string(count) + ")");
+    return true;
+}
+
 }   // namespace
 
 // =============================================================================
@@ -425,14 +499,22 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
     sb.suggestedBindings = bindings;
     if (!XrSucceeded(g_fn.suggestBindings(instance, &sb)))
     {
-        LogLine("[XRINPUT] xrSuggestInteractionProfileBindings failed");
+        LogLine("[XRINPUT] xrSuggestInteractionProfileBindings(simple-controller) failed");
         g_fn.ready = false;
         return false;
     }
 
+    const bool oculusBindings = SuggestProfileBindings(
+        instance, kOculusTouchProfile, kOculusTouchBindings,
+        static_cast<uint32_t>(sizeof(kOculusTouchBindings) / sizeof(kOculusTouchBindings[0])),
+        "oculus/touch_controller");
+    if (!oculusBindings)
+        LogLine("[XRINPUT] Oculus Touch bindings unavailable; controller gamepad stays fail-safe off");
+
     LogLine(std::string("[XRINPUT] ready: action set + ") + std::to_string(A_COUNT) +
-            " actions + 2 simple-controller pose bindings; button/axis bindings deferred; "
-            "session objects (attach/spaces) on first RUNNING frame");
+            " actions + simple-controller poses + Oculus Touch bindings=" +
+            (oculusBindings ? "ok" : "unavailable") +
+            "; session objects (attach/spaces) on first RUNNING frame");
     return true;
 }
 
@@ -582,17 +664,20 @@ bool BuildVirtualGamepad(XINPUT_STATE* state, const MELEVR::Config::VrConfig& cf
     g.bRightTrigger = (r.trigger > dz) ? 255 : 0;
     g.bLeftTrigger = (l.trigger > dz) ? 255 : 0;
 
-    // Grips -> shoulders, stick clicks -> L3/R3.
-    if (r.grip) g.wButtons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
-    if (l.grip) g.wButtons |= XINPUT_GAMEPAD_LEFT_SHOULDER;
+    // Quest Touch exposes grip as squeeze/value (an analogue action), so use
+    // the configured trigger deadzone for the shoulder fallback. A native
+    // boolean grip action, when a future profile supplies one, still works.
+    if (r.grip || r.squeeze > dz) g.wButtons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
+    if (l.grip || l.squeeze > dz) g.wButtons |= XINPUT_GAMEPAD_LEFT_SHOULDER;
     if (r.stickClick) g.wButtons |= XINPUT_GAMEPAD_RIGHT_THUMB;
     if (l.stickClick) g.wButtons |= XINPUT_GAMEPAD_LEFT_THUMB;
 
-    // Face buttons 1:1 - DEFAULT pending controllerLogRealPad verification (T4).
-    if (r.a) g.wButtons |= XINPUT_GAMEPAD_A;
-    if (r.b) g.wButtons |= XINPUT_GAMEPAD_B;
-    if (r.x) g.wButtons |= XINPUT_GAMEPAD_X;
-    if (r.y) g.wButtons |= XINPUT_GAMEPAD_Y;
+    // Face buttons: A/B come from the right Touch controller, X/Y from the
+    // left. Accept either hand as a harmless fallback for other profiles.
+    if (r.a || l.a) g.wButtons |= XINPUT_GAMEPAD_A;
+    if (r.b || l.b) g.wButtons |= XINPUT_GAMEPAD_B;
+    if (r.x || l.x) g.wButtons |= XINPUT_GAMEPAD_X;
+    if (r.y || l.y) g.wButtons |= XINPUT_GAMEPAD_Y;
 
     // Dpad (either hand; ME1 binds the weapon wheel / ui there).
     if (r.dpadUp || l.dpadUp) g.wButtons |= XINPUT_GAMEPAD_DPAD_UP;

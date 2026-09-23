@@ -303,6 +303,19 @@ M0 использует только официальные пути KHR simple-
 профиль: /interaction_profiles/khr/simple_controller
 ```
 
-Пути trigger/stick/face/dpad зависят от конкретного interaction profile и
-не являются `/user/input/.../gamepad/...`; они будут добавлены в отдельном
-профильном mapping-патче.
+Для Quest 2 через Virtual Desktop используется дополнительный профиль:
+
+```
+профиль: /interaction_profiles/oculus/touch_controller
+/user/hand/{right,left}/input/trigger/value
+/user/hand/{right,left}/input/squeeze/value
+/user/hand/{right,left}/input/thumbstick
+/user/hand/{right,left}/input/thumbstick/click
+/user/hand/right/input/a/click | /input/b/click
+/user/hand/left/input/x/click   | /input/y/click
+```
+
+M2 также подключает эти action states к обоим XInput hooks. Squeeze/value
+используется как shoulder/grip fallback, поскольку Oculus Touch не предлагает
+отдельную boolean grip-кнопку. D-pad у Touch отсутствует и остаётся нулевым
+до отдельного mapping-решения.

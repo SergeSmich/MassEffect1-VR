@@ -107,6 +107,19 @@ inline void CaptureLeftStick(const XINPUT_STATE* state, DWORD result, DWORD idx)
     }
 }
 
+// Stage 1 M2: replace the game's XInput result only when the user explicitly
+// enables the virtual gamepad and a valid OpenXR hand frame exists. Any XR
+// failure returns the original physical-pad result unchanged.
+inline DWORD MaybeSynthesizeControllerPad(XINPUT_STATE* state, DWORD realResult) noexcept
+{
+    if (g_open || state == nullptr) return realResult;   // never drive the menu from VR actions
+    const auto& c = MELEVR::Config::Get();
+    if (!c.controllerInput) return realResult;
+    if (!MELEVR::XrInput::BuildVirtualGamepad(state, c)) return realResult;
+    ++state->dwPacketNumber;
+    return ERROR_SUCCESS;
+}
+
 // Double-click R3 (right stick-click twice quickly) = recenter, on ANY controller: the game polls the pad
 // through XInput, so every controller that drives the game (Xbox natively, DualSense/DualShock/others via
 // Steam Input or a remapper) reaches this same hook. Double-click (not a single R3, which is melee) so it
@@ -180,9 +193,11 @@ bool MenuOwnsLook() noexcept
 
 DWORD WINAPI HookedXInputGetState(DWORD idx, XINPUT_STATE* state) noexcept
 {
-    const DWORD r = g_origXInput ? g_origXInput(idx, state) : ERROR_DEVICE_NOT_CONNECTED;
-    CaptureLeftStick(state, r, idx);
-    DetectRecenterCombo(state, r, idx);   // double-click R3 = recenter (read before any menu zeroing)
+    const DWORD realResult = g_origXInput ? g_origXInput(idx, state) : ERROR_DEVICE_NOT_CONNECTED;
+    MELEVR::XrInput::LogRealPadThrottled(state, realResult);
+    CaptureLeftStick(state, realResult, idx);
+    DetectRecenterCombo(state, realResult, idx);   // double-click R3 = recenter (read before synthesis/menu zeroing)
+    DWORD result = MaybeSynthesizeControllerPad(state, realResult);
     if (state != nullptr)
     {
         if (g_open)
@@ -198,7 +213,7 @@ DWORD WINAPI HookedXInputGetState(DWORD idx, XINPUT_STATE* state) noexcept
             if (c.moveFollowsHead) RotateMoveStickByHeadLook(&state->Gamepad);   // [MOVEFIX] run where you look
         }
     }
-    return r;
+    return result;
 }
 
 // XInputGetStateEx (ordinal 100, no named export in xinput1_3/1_4). Some engines poll the pad through THIS
@@ -207,10 +222,12 @@ DWORD WINAPI HookedXInputGetState(DWORD idx, XINPUT_STATE* state) noexcept
 // zeroes the pad the game reads while the menu is open; it never writes a game object.
 DWORD WINAPI HookedXInputGetStateEx(DWORD idx, XINPUT_STATE* state) noexcept
 {
-    const DWORD r = g_origXInputEx ? g_origXInputEx(idx, state)
-                                   : (g_origXInput ? g_origXInput(idx, state) : ERROR_DEVICE_NOT_CONNECTED);
-    CaptureLeftStick(state, r, idx);
-    DetectRecenterCombo(state, r, idx);   // double-click R3 = recenter (Ex poll path)
+    const DWORD realResult = g_origXInputEx ? g_origXInputEx(idx, state)
+                                            : (g_origXInput ? g_origXInput(idx, state) : ERROR_DEVICE_NOT_CONNECTED);
+    MELEVR::XrInput::LogRealPadThrottled(state, realResult);
+    CaptureLeftStick(state, realResult, idx);
+    DetectRecenterCombo(state, realResult, idx);   // double-click R3 = recenter (Ex poll path)
+    DWORD result = MaybeSynthesizeControllerPad(state, realResult);
     if (state != nullptr)
     {
         if (g_open)
@@ -226,7 +243,7 @@ DWORD WINAPI HookedXInputGetStateEx(DWORD idx, XINPUT_STATE* state) noexcept
             if (c.moveFollowsHead) RotateMoveStickByHeadLook(&state->Gamepad);   // [MOVEFIX]
         }
     }
-    return r;
+    return result;
 }
 
 
@@ -1019,9 +1036,8 @@ void BuildUI() noexcept
             }
 
             // ---- Controller Input (Stage 1, 2026-09-23) ----
-            // All OFF by default. M0: the section + config keys exist so the first run
-            // exercises the XrInput module (Init/OnFrame) and logs the loader generation.
-            // Aim swap (M1) and virtual gamepad synthesis (M2) are wired in later commits.
+            // All OFF by default. M2 supports Oculus Touch / Quest 2 (including
+            // Virtual Desktop) through the OpenXR action profile + XInput hooks.
             if (ImGui::CollapsingHeader("Controller Input (Stage 1)", ImGuiTreeNodeFlags_DefaultOpen))
             {
                 ImGui::Checkbox("Enable controller input (virtual gamepad)", &c.controllerInput);
