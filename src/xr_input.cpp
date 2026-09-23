@@ -701,6 +701,23 @@ bool BuildVirtualGamepad(XINPUT_STATE* state, const MELEVR::Config::VrConfig& cf
         g.sThumbRY = static_cast<SHORT>(ry * 32767.0f);
     }
 
+    // Low-rate diagnostic: unlike buttons, a vector action can be active but
+    // still arrive with an unexpected component/path mapping. Log both the raw
+    // OpenXR values and the final XInput integers while the virtual pad is on.
+    static uint64_t s_lastVirtualPadLogMs = 0;
+    const uint64_t nowMs = static_cast<uint64_t>(GetTickCount64());
+    if (nowMs - s_lastVirtualPadLogMs >= 1000)
+    {
+        s_lastVirtualPadLogMs = nowMs;
+        LogLine(std::string("[XRINPUT] virtual pad: rawL=(") +
+                std::to_string(l.stickX) + "," + std::to_string(l.stickY) +
+                ") rawR=(" + std::to_string(r.stickX) + "," + std::to_string(r.stickY) +
+                ") xinputL=(" + std::to_string(g.sThumbLX) + "," +
+                std::to_string(g.sThumbLY) + ") xinputR=(" +
+                std::to_string(g.sThumbRX) + "," + std::to_string(g.sThumbRY) +
+                ") buttons=0x" + std::to_string(g.wButtons));
+    }
+
     // XINPUT_STATE has no dwFlags member; XINPUT_FLAG_GAMEPAD belongs to the
     // dwFlags argument of XInputGetState, not to the returned state structure.
     return true;   // caller: dwPacketNumber++, return ERROR_SUCCESS from the hook
