@@ -84,8 +84,8 @@ struct ActionDef
 };
 
 constexpr ActionDef kActions[A_COUNT] = {
-    { "right_pose",             XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/hand/right/input/grip/pose" },
-    { "left_pose",              XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/hand/left/input/grip/pose"  },
+    { "right_pose",             XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/hand/right/input/aim/pose" },
+    { "left_pose",              XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/hand/left/input/aim/pose"  },
     { "right_trigger",          XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   nullptr },
     { "right_squeeze",          XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   nullptr },
     { "right_grip",             XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
@@ -129,8 +129,8 @@ struct BindingDef
 // draft's invented /user/input/.../gamepad/... paths, these are official 1.0
 // interaction-profile paths.
 constexpr BindingDef kOculusTouchBindings[] = {
-    { A_RIGHT_POSE, "/user/hand/right/input/grip/pose" },
-    { A_LEFT_POSE,  "/user/hand/left/input/grip/pose" },
+    { A_RIGHT_POSE, "/user/hand/right/input/aim/pose" },
+    { A_LEFT_POSE,  "/user/hand/left/input/aim/pose" },
     { A_R_TRIG,    "/user/hand/right/input/trigger/value" },
     { A_R_SQZ,     "/user/hand/right/input/squeeze/value" },
     { A_R_STICK,   "/user/hand/right/input/thumbstick" },

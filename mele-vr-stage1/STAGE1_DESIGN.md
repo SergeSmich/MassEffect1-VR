@@ -73,7 +73,7 @@
 
 | Действие | Тип | M0 binding |
 |---|---|---|
-| `right_pose`, `left_pose` | POSE | `/user/hand/{right,left}/input/grip/pose` |
+| `right_pose`, `left_pose` | POSE / controller ray | `/user/hand/{right,left}/input/aim/pose` |
 | `right_trigger`, `right_squeeze` | FLOAT | создаётся, binding отложен |
 | `right_grip` | BOOLEAN | создаётся, binding отложен |
 | `right_thumbstick` | VECTOR2F | создаётся, binding отложен |
@@ -291,11 +291,9 @@ xrUpdateActionState, XrActionSpaceCreateInfo) — совпадает.
 
 ## Приложение B. Проверенные input-пути (OpenXR 1.0)
 
-M0 использует только официальные пути KHR simple-controller:
+M0 использует официальный controller-ray pose из KHR simple-controller:
 
 ```
-/user/hand/right/input/grip/pose
-/user/hand/left/input/grip/pose
 /user/hand/right/input/aim/pose
 /user/hand/left/input/aim/pose
 /user/hand/{right,left}/input/select/click
