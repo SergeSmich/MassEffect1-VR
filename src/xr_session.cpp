@@ -4095,7 +4095,9 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                 if (g_headAimActive) ReleaseHeadAim(ctrlLive && ctrlStable);
                 s_controllerAimSource = controllerAimActive;
                 LogLine(std::string("[HEADAIM] source -> ") +
-                        (controllerAimActive ? "controller" : "head"));
+                        (controllerAimActive
+                             ? "controller (HMD camera decoupled)"
+                             : "head"));
             }
             const bool controllerAimReady = !cfg.controllerAim || controllerAimActive;
             const bool aimGatesPass = cfg.combatHeadAim && weaponOut && !isStorm && !forceFlatCine &&
@@ -4130,10 +4132,16 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                 // It also keeps [MOVEFIX] consistent via HeadLookYawUU.
                 if (aimSourceAvailable)
                 {
-                    // Controller aim changes only the game-aim source. Keep
-                    // render-side head look active so the view remains
-                    // head-stable while the reticle follows the right ray.
-                    const HeadLookUU look = HeadLookFromAngles(yawDeg, pitchDeg, cfg);
+                    // Controller aim changes ControlRotation for the game's
+                    // weapon/character aim, but it must not turn the HMD view.
+                    // ControlRotation can also affect the game's base camera,
+                    // so cancel only this frame's controller injection in the
+                    // render-side look offset. The signs match the existing
+                    // head-aim handoff: +ControlRotation yaw is equivalent to
+                    // -render-look yaw, while pitch has the same sign.
+                    HeadLookUU look = HeadLookFromAngles(yawDeg, pitchDeg, cfg);
+                    look.yaw += g_appliedHeadYawUU;
+                    look.pitch -= g_appliedHeadPitchUU;
                     MELEVR::RenderHook::SetHeadLook(look.yaw, look.pitch, true);
                 }
                 else if (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0)
