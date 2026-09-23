@@ -628,6 +628,37 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
         }
         QuatYawPitchDeg(g_aimQuat, g_frame.aimYawDeg, g_frame.aimPitchDeg);
         g_frame.aimValid = true;
+
+        // This is intentionally separate from the virtual-pad stick log:
+        // pose orientation is the controller-ray source, while rawR there is
+        // only the optional right thumbstick. Log both the raw pose direction
+        // and the post-smoothing direction used by GetAimDeg().
+        static uint64_t s_lastAimLogMs = 0;
+        const uint64_t nowMs = static_cast<uint64_t>(GetTickCount64());
+        if (nowMs - s_lastAimLogMs >= 1000)
+        {
+            float rawYaw = 0.0f, rawPitch = 0.0f;
+            QuatYawPitchDeg(g_frame.right.poseOrientation, rawYaw, rawPitch);
+            float targetYaw = 0.0f, targetPitch = 0.0f;
+            QuatYawPitchDeg(target, targetYaw, targetPitch);
+            s_lastAimLogMs = nowMs;
+            LogLine("[XRINPUT] aim pose rawDeg=(" + std::to_string(rawYaw) + "," +
+                    std::to_string(rawPitch) + ") targetDeg=(" +
+                    std::to_string(targetYaw) + "," + std::to_string(targetPitch) +
+                    ") smoothedDeg=(" + std::to_string(g_frame.aimYawDeg) + "," +
+                    std::to_string(g_frame.aimPitchDeg) + ") pos=(" +
+                    std::to_string(g_frame.right.posePosition.x) + "," +
+                    std::to_string(g_frame.right.posePosition.y) + "," +
+                    std::to_string(g_frame.right.posePosition.z) + ")");
+        }
+    }
+    else
+    {
+        // Do not carry an old right-hand orientation across a lost/touched
+        // controller transition. The next valid pose must become the new
+        // controller reference directly, rather than smoothing from stale
+        // data and producing an apparent snap.
+        g_aimLatched = false;
     }
 }
 

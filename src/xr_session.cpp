@@ -2226,22 +2226,25 @@ void ReleaseHeadAim(bool restoreWrite) noexcept
 
 // Head aims via ControlRotation, ADDITIVE with the stick (proven signs from bdc3c4c: +1/+1 on the
 // HeadEulerDegrees yaw/pitch; the caller applies cfg invert as an input-sign flip).
-void DriveAimWithHead(float headYawDeg, float headPitchDeg) noexcept
+void DriveAimWithHead(float headYawDeg, float headPitchDeg,
+                       bool preserveRenderHandoff = true) noexcept
 {
     if (!g_headAimActive)
     {
-        // [AIMSEED] continuity handoff (2026-07-16: crosshair "snaps lower" when a storm ends):
-        // if render-side head-LOOK was applied last frame (storm exit, weapon draw while free-looking),
-        // the view is rotated off ControlRotation by the look offset. The old zero-latch (ref = current
-        // head, injection 0) threw that offset away at the handoff, so the whole VIEW snapped by it and
-        // the crosshair landed back at body-forward - look and aim held the head offset "in separate
-        // positions". v2: the offset is captured as a RAMP TARGET (see g_seedRem* above) and transferred
-        // look->CR over ~0.3s so the pawn's animated weapon aim can follow; the view never moves because
-        // the caller keeps rendering the untransferred remainder as head-look. Signs: look +UU = view
-        // turned LEFT, ControlRotation +UU = turn RIGHT -> yaw flips; pitch is +up on both sides -> 1:1.
-        // Accessors return 0 when look was off -> plain zero-latch, old behavior exactly.
-        g_seedRemYawUU   = -MELEVR::RenderHook::HeadLookYawUU();
-        g_seedRemPitchUU =  MELEVR::RenderHook::HeadLookPitchUU();
+        // [AIMSEED] continuity handoff for the ordinary HMD head-aim path. A
+        // controller ray is deliberately independent of the HMD: importing a
+        // render-side head offset into the controller source would reintroduce
+        // the fixed jump that source switching is meant to avoid.
+        if (preserveRenderHandoff)
+        {
+            g_seedRemYawUU   = -MELEVR::RenderHook::HeadLookYawUU();
+            g_seedRemPitchUU =  MELEVR::RenderHook::HeadLookPitchUU();
+        }
+        else
+        {
+            g_seedRemYawUU = 0;
+            g_seedRemPitchUU = 0;
+        }
         g_seedDoneYawUU = 0;
         g_seedDonePitchUU = 0;
         g_headRefYawDeg = headYawDeg;
@@ -2249,7 +2252,9 @@ void DriveAimWithHead(float headYawDeg, float headPitchDeg) noexcept
         g_appliedHeadYawUU = 0;
         g_appliedHeadPitchUU = 0;
         g_headAimActive = true;
-        LogLine(std::string("[HEADAIM] aim ON (current source, additive with stick)") +
+        LogLine(std::string("[HEADAIM] aim ON (") +
+                (preserveRenderHandoff ? "head" : "controller") +
+                " source, additive with stick)" +
                 (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0
                      ? " ramping in head-look offset yawUU=" + std::to_string(g_seedRemYawUU) +
                        " pitchUU=" + std::to_string(g_seedRemPitchUU) + "."
@@ -2289,6 +2294,21 @@ void DriveAimWithHead(float headYawDeg, float headPitchDeg) noexcept
     if (!MELEVR::HeadAim::WriteControlRotationUU(newPitchUU, newYawUU, rUU)) return;
     g_appliedHeadYawUU = headYawUU;
     g_appliedHeadPitchUU = headPitchUU;
+
+    // Keep the source transition and the actual game-facing rotation visible
+    // without flooding the runtime log. For controller aim, headYaw/headPitch
+    // are the controller ray; for ordinary head aim they are the HMD angles.
+    static uint64_t s_driveDiag = 0;
+    if ((s_driveDiag++ % 60ull) == 0)
+    {
+        LogLine(std::string("[HEADAIM] drive source=") +
+                (preserveRenderHandoff ? "head" : "controller") +
+                " inputDeg=(" + std::to_string(headYawDeg) + "," +
+                std::to_string(headPitchDeg) + ") deltaUU=(" +
+                std::to_string(headYawUU) + "," + std::to_string(headPitchUU) +
+                ") controlUU=(" + std::to_string(newYawUU) + "," +
+                std::to_string(newPitchUU) + ")");
+    }
 }
 
 
@@ -4094,7 +4114,10 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                 pitchDegForLog = aimSrcPitch;
                 const float aimYaw = cfg.invertAimYaw ? -aimSrcYaw : aimSrcYaw;
                 float aimPitch = cfg.invertAimPitch ? -aimSrcPitch : aimSrcPitch;
-                DriveAimWithHead(aimYaw, aimPitch);
+                // Controller aim must not import the HMD render offset into
+                // its ControlRotation handoff. Head aim keeps the established
+                // render-to-CR continuity ramp.
+                DriveAimWithHead(aimYaw, aimPitch, !controllerAimActive);
                 // Native head aim normally leaves orientation following the aim
                 // (SetHeadLook 0), so the camera center and reticle stay aligned.
                 // Controller aim is the deliberate exception: its branch below
