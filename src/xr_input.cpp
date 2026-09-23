@@ -71,40 +71,47 @@ static_assert(A_COUNT == 28, "action table size (2 poses + 2x13)");
 
 struct ActionDef
 {
+    // OpenXR action names are identifiers: slash is not allowed here. Slashes
+    // belong to the separate binding-path strings below.
     const char* name;
     int32_t     type;    // XrActionType, 1.0 values: 1 bool, 2 float, 3 vec2, 4 pose
-    const char* path;    // standard KHR simple-controller input path
+    // M0 only proposes the two bindings present in the Khronos simple-controller
+    // profile. Its official controls are grip/aim pose, select and menu; it does
+    // NOT define trigger/stick/A/B/X/Y/dpad. The remaining actions are created
+    // now (so the action ABI is exercised) and get profile-specific bindings in
+    // the controller-profile milestone.
+    const char* simpleControllerPath;   // nullptr = intentionally unbound in M0
 };
 
 constexpr ActionDef kActions[A_COUNT] = {
-    { "right/pose",             XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/input/right/pose" },
-    { "left/pose",              XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/input/left/pose"  },
-    { "right/trigger",          XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   "/user/input/right/gamepad/trigger" },
-    { "right/squeeze",          XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   "/user/input/right/gamepad/squeeze" },
-    { "right/grip",             XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/gamepad/grip" },
-    { "right/thumbstick",       XR_ACTION_TYPE_VECTOR2F_INPUT_VALUE,"/user/input/right/gamepad/thumbstick" },
-    { "right/thumbstick/click", XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/gamepad/thumbstick/click" },
-    { "right/a",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/a" },
-    { "right/b",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/b" },
-    { "right/x",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/x" },
-    { "right/y",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/y" },
-    { "right/dpad/up",          XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/dpad/up" },
-    { "right/dpad/down",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/dpad/down" },
-    { "right/dpad/left",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/dpad/left" },
-    { "right/dpad/right",       XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/right/dpad/right" },
-    { "left/trigger",           XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   "/user/input/left/gamepad/trigger" },
-    { "left/squeeze",           XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   "/user/input/left/gamepad/squeeze" },
-    { "left/grip",              XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/gamepad/grip" },
-    { "left/thumbstick",        XR_ACTION_TYPE_VECTOR2F_INPUT_VALUE,"/user/input/left/gamepad/thumbstick" },
-    { "left/thumbstick/click",  XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/gamepad/thumbstick/click" },
-    { "left/a",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/a" },
-    { "left/b",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/b" },
-    { "left/x",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/x" },
-    { "left/y",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/y" },
-    { "left/dpad/up",           XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/dpad/up" },
-    { "left/dpad/down",         XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/dpad/down" },
-    { "left/dpad/left",         XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/dpad/left" },
-    { "left/dpad/right",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, "/user/input/left/dpad/right" },
+    { "right_pose",             XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/hand/right/input/grip/pose" },
+    { "left_pose",              XR_ACTION_TYPE_POSE_INPUT_VALUE,    "/user/hand/left/input/grip/pose"  },
+    { "right_trigger",          XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   nullptr },
+    { "right_squeeze",          XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   nullptr },
+    { "right_grip",             XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_thumbstick",       XR_ACTION_TYPE_VECTOR2F_INPUT_VALUE,nullptr },
+    { "right_thumbstick_click", XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_a",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_b",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_x",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_y",                XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_dpad_up",          XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_dpad_down",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_dpad_left",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_dpad_right",       XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_trigger",           XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   nullptr },
+    { "left_squeeze",           XR_ACTION_TYPE_FLOAT_INPUT_VALUE,   nullptr },
+    { "left_grip",              XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_thumbstick",        XR_ACTION_TYPE_VECTOR2F_INPUT_VALUE,nullptr },
+    { "left_thumbstick_click",  XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_a",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_b",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_x",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_y",                 XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_dpad_up",           XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_dpad_down",         XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_dpad_left",         XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "left_dpad_right",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
 };
 static_assert(A_COUNT == (int)(sizeof(kActions) / sizeof(kActions[0])), "kActions table matches the enum");
 
@@ -374,7 +381,8 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
     }
 
     // ---- actions + suggested bindings (KHR simple controller) ----
-    XrActionSuggestedBinding bindings[A_COUNT];
+    XrActionSuggestedBinding bindings[A_COUNT] = {};
+    uint32_t bindingCount = 0;
     for (int i = 0; i < A_COUNT; ++i)
     {
         XrActionCreateInfo aci = {};
@@ -390,20 +398,30 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
             g_fn.ready = false;
             return false;
         }
-        if (!XrSucceeded(g_fn.stringToPath(instance, kActions[i].path, &g_actionPaths[i])))
+
+        // Only pose paths are legal for the simple-controller profile. Keep the
+        // other actions available for the later controller-profile bindings,
+        // but do not submit invented paths to xrSuggestInteractionProfileBindings.
+        if (kActions[i].simpleControllerPath != nullptr)
         {
-            LogLine(std::string("[XRINPUT] xrStringToPath('") + kActions[i].path + "') failed");
-            g_fn.ready = false;
-            return false;
+            if (!XrSucceeded(g_fn.stringToPath(instance, kActions[i].simpleControllerPath,
+                                               &g_actionPaths[i])))
+            {
+                LogLine(std::string("[XRINPUT] xrStringToPath('") +
+                        kActions[i].simpleControllerPath + "') failed");
+                g_fn.ready = false;
+                return false;
+            }
+            bindings[bindingCount].action = g_actions[i];
+            bindings[bindingCount].binding = g_actionPaths[i];
+            ++bindingCount;
         }
-        bindings[i].action = g_actions[i];
-        bindings[i].binding = g_actionPaths[i];
     }
 
     XrInteractionProfileSuggestedBinding sb = {};
     sb.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING_VALUE;
     sb.interactionProfile = profile;
-    sb.countSuggestedBindings = A_COUNT;
+    sb.countSuggestedBindings = bindingCount;
     sb.suggestedBindings = bindings;
     if (!XrSucceeded(g_fn.suggestBindings(instance, &sb)))
     {
@@ -413,7 +431,8 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
     }
 
     LogLine(std::string("[XRINPUT] ready: action set + ") + std::to_string(A_COUNT) +
-            " actions + simple-controller bindings; session objects (attach/spaces) on first RUNNING frame");
+            " actions + 2 simple-controller pose bindings; button/axis bindings deferred; "
+            "session objects (attach/spaces) on first RUNNING frame");
     return true;
 }
 

@@ -69,20 +69,25 @@
 
 ### 4.1 Actions и bindings
 
-Один action set `melevr-input`, действия = полное «gamepad»-зеркало двух рук (стандартный KHR simple-controller профиль поддерживается SteamVR, Quest Link, Virtual Desktop):
+Один action set `melevr-input`, действия = полное «gamepad»-зеркало двух рук. В M0 создаются все 28 действий, но в официальный профиль `/interaction_profiles/khr/simple_controller` предлагаются только две pose-привязки:
 
-| Действие | Тип | Путь биндинга |
+| Действие | Тип | M0 binding |
 |---|---|---|
-| `right/pose`, `left/pose` | POSE | `/user/input/{r,l}/pose` |
-| `right/trigger`, `right/squeeze` | FLOAT | `/user/input/right/gamepad/{trigger,squeeze}` |
-| `right/grip` | BOOLEAN | `/user/input/right/gamepad/grip` |
-| `right/thumbstick` | VECTOR2F | `/user/input/right/gamepad/thumbstick` |
-| `right/thumbstick/click` | BOOLEAN | `/user/input/input/right/gamepad/thumbstick/click` |
-| `right/{a,b,x,y}` | BOOLEAN | `/user/input/right/{a,b,x,y}` |
-| `right/dpad/{up,down,left,right}` | BOOLEAN | `/user/input/right/dpad/*` |
-| `left/…` (аналогично) | … | `/user/input/left/…` |
+| `right_pose`, `left_pose` | POSE | `/user/hand/{right,left}/input/grip/pose` |
+| `right_trigger`, `right_squeeze` | FLOAT | создаётся, binding отложен |
+| `right_grip` | BOOLEAN | создаётся, binding отложен |
+| `right_thumbstick` | VECTOR2F | создаётся, binding отложен |
+| `right_thumbstick_click` | BOOLEAN | создаётся, binding отложен |
+| `right_{a,b,x,y}` | BOOLEAN | создаётся, binding отложен |
+| `right_dpad_{up,down,left,right}` | BOOLEAN | создаётся, binding отложен |
+| `left_…` (аналогично) | … | создаётся, binding отложен |
 
-Профиль: `xrSuggestInteractionProfileBindings` c путём `/interaction_profiles/khr/simple_controller` — единственный нужный профиль; остальные runtime-специфичные профили не нужны.
+Имена actions — идентификаторы без `/`; slash допустим только в input paths.
+Профиль KHR simple-controller официально содержит `grip/pose`, `aim/pose`,
+`select/click`, `menu/click`; trigger/stick/A/B/X/Y/D-pad в нём нет. Поэтому
+M0 предлагает ему только две pose-привязки. Профильные bindings для Touch/
+Index/Motion Controller и mapping кнопок — отдельная задача M2/M3, а не
+невалидный универсальный `/user/input/.../gamepad/...` путь.
 
 ### 4.2 Tracking контроллеров — через action spaces (важное решение)
 
@@ -93,7 +98,7 @@ xrCreateActionSpace(session, {action=right/pose, subactionPath=INVALID, pose=ide
 xrLocateSpace(rightSpace, g_appSpace, displayTime, &loc)   // -> XrSpaceLocation{locationFlags, pose}
 ```
 
-Почему: в моде `XrReferenceSpaceCreateInfo` — **4-полевая 0.9-эра** (`type, next, referenceSpaceType, poseInReferenceSpace`, без `targetLocation/userPath`), и бандл `openxr_loader.dll` подтверждён работой именно с ней. Input-space через 4-полевой struct не создашь; а `XrActionSpaceCreateInfo` и `xrLocateSpace` — простые структуры, не зависящие от этой дилеммы. Бонус: позы рук приходят в **том же app-space, что и поза головы** (`g_subViews`) — aim и head-look живут в одной системе координат.
+Почему: в моде `XrReferenceSpaceCreateInfo` — 4-полевая структура штатного OpenXR 1.0 ABI (`type, next, referenceSpaceType, poseInReferenceSpace`; `targetLocation/userPath` появились только в 1.1). Input-space через этот struct всё равно не создашь; `XrActionSpaceCreateInfo` и `xrLocateSpace` — правильный 1.0 путь для pose actions. Бонус: позы рук приходят в **том же app-space, что и поза головы** (`g_subViews`) — aim и head-look живут в одной системе координат.
 
 ### 4.3 Frame loop (render thread)
 
@@ -284,12 +289,20 @@ XrActionType: BOOLEAN_INPUT=1, FLOAT_INPUT=2, VECTOR2F_INPUT=3, POSE_INPUT=4
 xrUpdateActionState, XrActionSpaceCreateInfo) — совпадает.
 ```
 
-## Приложение B. Проверенные input-пути (OpenXR 1.0, standard controller)
+## Приложение B. Проверенные input-пути (OpenXR 1.0)
+
+M0 использует только официальные пути KHR simple-controller:
 
 ```
-/user/input/right/pose                     /user/input/left/pose
-/user/input/{r,l}/gamepad/trigger|squeeze|grip
-/user/input/{r,l}/gamepad/thumbstick       /user/input/{r,l}/gamepad/thumbstick/click
-/user/input/{r,l}/a|b|x|y                  /user/input/{r,l}/dpad/up|down|left|right
+/user/hand/right/input/grip/pose
+/user/hand/left/input/grip/pose
+/user/hand/right/input/aim/pose
+/user/hand/left/input/aim/pose
+/user/hand/{right,left}/input/select/click
+/user/hand/{right,left}/input/menu/click
 профиль: /interaction_profiles/khr/simple_controller
 ```
+
+Пути trigger/stick/face/dpad зависят от конкретного interaction profile и
+не являются `/user/input/.../gamepad/...`; они будут добавлены в отдельном
+профильном mapping-патче.
