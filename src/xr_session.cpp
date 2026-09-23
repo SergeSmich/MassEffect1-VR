@@ -4143,6 +4143,7 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                     look.yaw += g_appliedHeadYawUU;
                     look.pitch -= g_appliedHeadPitchUU;
                     MELEVR::RenderHook::SetHeadLook(look.yaw, look.pitch, true);
+                    headLookApplied = true;
                 }
                 else if (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0)
                 {
