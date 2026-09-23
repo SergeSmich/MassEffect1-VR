@@ -64,6 +64,7 @@
     <ClCompile Include="vr_menu.cpp" />
     <ClCompile Include="vr_config.cpp" />
     <ClCompile Include="head_aim.cpp" />
+    <ClCompile Include="xr_input.cpp" />
     <ClCompile Include="pchud.cpp" />
     <ClCompile Include="..\third_party\imgui\imgui.cpp">
       <WarningLevel>Level1</WarningLevel>
@@ -104,6 +105,7 @@
     <ClInclude Include="vr_menu.h" />
     <ClInclude Include="vr_config.h" />
     <ClInclude Include="head_aim.h" />
+    <ClInclude Include="xr_input.h" />
     <ClInclude Include="pchud.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

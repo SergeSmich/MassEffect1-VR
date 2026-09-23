@@ -3,6 +3,25 @@
 Мод: `jrush64/MassEffect1-VR` (6DOF VR для Mass Effect LE1, dxgi.dll прокси, UE3 build 2.0.0.48602).
 Статус: дизайн-документ + черновик кода (2026-09-23). Лицензия проекта: GPL-3.0.
 
+**Редакция 2026-09-23 (ревью нового чата + M0-интеграция):**
+- ABI-поколение бандл-лоадера **определено бинарным анализом** `release/openxr_loader.dll`
+  (таблица имён): лоадер 1.0-поколения (есть `xrAttachSessionActionSets`,
+  `xrSuggestInteractionProfileBindings`; 0.9-алиасов нет). 4-полевой
+  `XrReferenceSpaceCreateInfo` — штатный 1.0-лейаут (`targetLocation`/`userPath`
+  появились только в 1.1), диагноз «0.9-эра» из первого черновика был ошибочным.
+  Фолбэк Приложения А **не требуется**.
+- Исправлен API action-state: в OpenXR нет `xrSyncInputs`/`xrUpdateActionState`
+  (их упоминал черновик). Реальный API — `xrSyncActions(session, XrActionsSyncInfo*)`
+  + `xrGetActionState{Boolean,Float,Vector2f}(session, ...)`; таблица имён
+  бандл-лоадера это подтверждает. Структуры `XrActiveActionSet`/`XrActionsSyncInfo`
+  добавлены в патч 01.
+- `A_COUNT` = **28** (2 pose + 2×13), не 29 (черновик не компилировался).
+- `XrSpaceLocation.locationFlags` — 64-битный (`XrFlags64`), не 32-битный.
+- Все 12 констант и лейауты структур проверены по официальному openxr.h
+  release-1.0.34 (автоматический sizeof/offsetof-чек, 100% совпадение).
+- Уточнения: latch логирования session-setup, идемпотентный `Init()`,
+  полный memset `XINPUT_STATE` при синтезе (dwPacketNumber).
+
 ---
 
 ## 1. Цель и не-цели
@@ -84,9 +103,9 @@ OnFrame(appSpace, displayTime, headQuat):
        xrAttachSessionActionSets(session, {g_actionSet})
        пересоздать rightSpace/leftSpace (action spaces — session-bound)
        g_attachedSession = session
-  2. xrSyncInputs(instance, &n, actions[29])
+  2. xrSyncActions(session, {countActiveActionSets=1, {g_actionSet, XR_PATH_INVALID}})
   3. xrLocateSpace ×2  (правая, левая)  -> poseValid по locationFlags
-  4. xrUpdateActionState ×N  -> raw-массивы val/bool/vec2
+  4. xrGetActionState{Boolean,Float,Vector2f}(session, {action}) ×26  -> val/bool/vec2
   5. smoothing aim-quaternion (slerp low-pass + head-blend) -> aimYaw/aimPitch
   6. опубликовать g_frame (InputFrame)  // единственный поток — без синхронизации
 ```
@@ -137,11 +156,16 @@ bool BuildVirtualGamepad(XINPUT_STATE* state, const Config::VrConfig& cfg) noexc
 ## 6. Источник прицела (aim source)
 
 ```
-AimQuat_raw = slerp(headQuat, rightHandQuat, cfg.controllerAimHeadBlend)   // 0 = чистый контроллер
+AimQuat_raw = (blend == 0) ? rightHandQuat : slerp(headQuat, rightHandQuat, blend)
+              где blend = cfg.controllerAimHeadBlend (t = ВЕС ГОЛОВЫ: 0 = чистый контроллер, 1 = чистая голова)
 AimQuat     = slerp(AimQuat_prev, AimQuat_raw, 1 - cfg.controllerAimSmoothing)  // low-pass
 yaw/pitch   = HeadEulerDegrees-конвенция (forward = R*(0,0,-1))
 запись      = DriveAimWithHead(yaw, pitch)   // БЕЗ ИЗМЕНЕНИЙ — тот же санкционированный путь
 ```
+(В коде — `QuatSlerp(headQuat, target, blend)` под guard `blend > 0.001`: при
+blend=0 slerp не вызывается и луч берётся чистым; т.е. t есть вес головы.
+Первый вариант формулы в этом доке был с перепутанным порядком аргументов —
+исправлено в редакции 2026-09-23.)
 
 Где переключается (2 точки, оба существующих гейта — `combatHeadAim`, weapon-out, !storm, gameMode, ctrlLive/ctrlStable — сохраняются):
 
@@ -192,13 +216,15 @@ XR_SPACE_LOCATION_POSITION_VALID_BIT      = 0x2
 XrActionType: BOOLEAN_INPUT=1, FLOAT_INPUT=2, VECTOR2F_INPUT=3, POSE_INPUT=4
 ```
 
-**Точки неопределённости (бандл-лоадер может быть 0.9-эры — его `XrReferenceSpaceCreateInfo` 4-полевой, что указывает на pre-final-1.0 ABI):**
+**Точки неопределённости — РАЗРЕШЕНЫ (редакция 2026-09-23, бинарный анализ `release/openxr_loader.dll`):**
 
-1. Имена функций: `xrAttachSessionActionSets` (1.0) vs `xrSessionAttachActionSets` (0.9); `xrSuggestInteractionProfileBindings` (1.0) vs `xrCreateActionSetBindings` (0.9).
-2. `XrActionCreateInfo`: в 1.0 `actionSet` передаётся **аргументом** `xrCreateAction(actionSet, ...)`, в 0.9 — полем структуры.
-3. `XrActionType`: 1.0 = {1,2,3,4}, 0.9 = {0,1,2,3}.
+1. Имена функций: в таблице лоадера есть `xrAttachSessionActionSets` и `xrSuggestInteractionProfileBindings` (1.0), и **нет** 0.9-имён (`xrSessionAttachActionSets`, `xrCreateActionSetBindings`). → 1.0.
+2. `XrActionCreateInfo` без поля `actionSet` (1.0-лейаут) — совпадает с официальным openxr.h 1.0.34 (автоматический sizeof/offsetof-чек). → 1.0.
+3. `XrActionType` = {1,2,3,4} (1.0) — совпадает с 1.0.34. → 1.0.
+4. `XrReferenceSpaceCreateInfo` 4-полевой — это **штатный 1.0** (`targetLocation`/`userPath` добавлены только в OpenXR 1.1); предположение «0.9-эра» снято.
+5. Action-state API: `xrSyncActions` + `xrGetActionState{Boolean,Float,Vector2f}` (session-based) — как в таблице лоадера и в 1.0.34. (Черновик ошибочно упоминал несуществующие `xrSyncInputs`/`xrUpdateActionState` — исправлено.)
 
-**Решение: ABI-проба.** `XrInput::Init()` резолвит оба варианта имён, логгирует в `MELEVR_Log.txt` (`[XRINPUT] loader gen: 1.0|0.9, attach=ok, suggest=ok, sync=ok, locateSpace=ok`), и черновик компилируется под 1.0-набор. Если проба покажет 0.9 — включаем `#define MELEVR_XRINPUT_09` (фолбэк-таблица в Приложении А). Первый запуск с пробой = решение вопроса, после чего код пинимся.
+**ABI-проба (осталась, упрощена).** `XrInput::Init()` делает tolerant-resolve всех 14 имён (каждый промах логируется отдельно) и пишет в `MELEVR_Log.txt` строку `[XRINPUT] loader gen probe: 1.0-generation action API fully resolved (...)`. Первый запуск (M0) подтверждает бинарный анализ «вживую»; 0.9-фолбэк (`MELEVR_XRINPUT_09`) в код **не включён** — не требуется.
 
 ## 10. Модель безопасности
 
@@ -232,7 +258,7 @@ XrActionType: BOOLEAN_INPUT=1, FLOAT_INPUT=2, VECTOR2F_INPUT=3, POSE_INPUT=4
 
 | Риск | Митигация |
 |---|---|
-| ABI бандл-лоадера (0.9 vs 1.0) | М0-проба + Приложение А; худший случай — 0.9-фолбэк (те же структуры, другие имена/значения) |
+| ~~ABI бандл-лоадера (0.9 vs 1.0)~~ | **СНЯТ 2026-09-23**: бинарный анализ показал 1.0-поколение; М0-запуск лишь подтверждает строкой лога |
 | Маппинг кнопок ME1 неизвестен 100% | `controllerLogRealPad` (T4); при необходимости — переназначаемая таблица в Этапе 1.1 |
 | Комфорт: джиттер/лаг луча | low-pass + head-blend (настройки), тьюнинг T6 |
 | Ложные ожидания «как HL2» | Документировано: это «HL2-lite» — механика 100%, визуал рук/привязки оружия — Этап 2–3 |
@@ -240,7 +266,11 @@ XrActionType: BOOLEAN_INPUT=1, FLOAT_INPUT=2, VECTOR2F_INPUT=3, POSE_INPUT=4
 
 ---
 
-## Приложение A. Фолбэк 0.9-поколения (если ABI-проба покажет 0.9)
+## Приложение A. Фолбэк 0.9-поколения — НЕ ТРЕБУЕТСЯ (разрешено 2026-09-23)
+
+Бинарный анализ `release/openxr_loader.dll` показал чистое 1.0-поколение action-API
+(см. раздел 9); код компилируется только под 1.0-набор. Таблица ниже оставлена
+для истории (в первый раз была зафиксирована на случай 0.9):
 
 ```
 Имена функций:  xrSessionAttachActionSets (вместо xrAttachSessionActionSets)

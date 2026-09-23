@@ -22,6 +22,7 @@
 #include "vr_config.h"
 #include "head_aim.h"
 #include "pchud.h"
+#include "xr_input.h"   // Stage 1: controller input (M0: Init/OnFrame, consumers off)
 
 // Milestone 1: 6DOF head tracking (rotation), no stereo. Builds on M0's OpenXR plumbing.
 //  - LOOK AROUND, two modes by weapon state:
@@ -650,6 +651,19 @@ bool CreateSessionAndSwapchains()
     vrci.poseInReferenceSpace = IdentityPose();
     r = g_fn.createReferenceSpace(g_session, &vrci, &g_viewSpace);
     LogLine("[XR] xrCreateReferenceSpace(VIEW): " + FmtXr(r));
+
+    // Stage 1: VR controller input. Self-contained (resolves its own loader
+    // functions through g_getProc). Fail-safe: on failure the feature is simply
+    // off - current behaviour unchanged. M0: all consumers are OFF by default;
+    // the first run's [XRINPUT] lines report the loader's action-API generation.
+    if (MELEVR::XrInput::Init(g_instance, g_session, g_getProc))
+    {
+        LogLine("[XR] controller input module initialized");
+    }
+    else
+    {
+        LogLine("[XR] controller input module init failed - feature disabled (fail-safe)");
+    }
     return XrSucceeded(r) && g_viewSpace != nullptr;
 }
 
@@ -683,6 +697,7 @@ void PollEvents()
             {
                 g_fn.endSession(g_session);
                 g_sessionRunning = false;
+                MELEVR::XrInput::SessionInvalidated();   // Stage 1: drop session-bound action spaces (recreated on next RUNNING)
             }
             else if (g_sessionState == XR_SESSION_STATE_EXITING_VALUE ||
                      g_sessionState == XR_SESSION_STATE_LOSS_PENDING_VALUE)
@@ -3828,6 +3843,14 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
     const XrQuaternionf headQuatForFrame =
         (headValid && s_smoothInit) ? s_smoothQuat : (headValid ? g_subViews[0].pose.orientation
                                                                 : IdentityPose().orientation);
+
+    // Stage 1: controller input frame (same thread/timebase as the head pose).
+    // Publishes the aim source + virtual-pad state; no-op when not ready. M0:
+    // consumers are OFF by default - this only syncs/locates and lets the first
+    // run log tracking status. Aim swap lands in M1 (below, at the two
+    // DriveAimWithHead sites); virtual-pad synthesis in M2 (vr_menu XInput hook).
+    if (MELEVR::XrInput::IsReady())
+        MELEVR::XrInput::OnFrame(g_appSpace, fs.predictedDisplayTime, headQuatForFrame);
 
     bool headLookApplied = false;
     bool headAimApplied = false;

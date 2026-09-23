@@ -237,6 +237,10 @@ void ApplyKeyValue(VrConfig& c, const char* key, double val) noexcept
     if (strcmp(key, "combatCamHold") == 0) { c.combatCamHold = b; return; }
     if (strcmp(key, "combatCamHoldInvert") == 0) { c.combatCamHoldInvert = b; return; }
     if (strcmp(key, "combatCamHoldGain") == 0) { c.combatCamHoldGain = v; return; }
+    // Stage 1: VR controller input
+    if (strcmp(key, "controllerAimSmoothing") == 0) { c.controllerAimSmoothing = v; return; }
+    if (strcmp(key, "controllerAimHeadBlend") == 0) { c.controllerAimHeadBlend = v; return; }
+    if (strcmp(key, "controllerTriggerDeadzone") == 0) { c.controllerTriggerDeadzone = v; return; }
     if      (strcmp(key, "recenterKey")        == 0) c.recenterKey        = i;
     if (strcmp(key, "headLookEnabled")         == 0) c.headLookEnabled    = b;
     else if (strcmp(key, "invertLookYaw")      == 0) c.invertLookYaw      = b;
@@ -246,6 +250,10 @@ void ApplyKeyValue(VrConfig& c, const char* key, double val) noexcept
     else if (strcmp(key, "combatHeadTracking") == 0) c.combatHeadTracking = b;
     else if (strcmp(key, "combatHeadAim")      == 0) c.combatHeadAim      = b;
     else if (strcmp(key, "makoHeadAim")        == 0) c.makoHeadAim        = b;
+    else if (strcmp(key, "controllerInput") == 0) c.controllerInput = b;
+    else if (strcmp(key, "controllerAim") == 0) c.controllerAim = b;
+    else if (strcmp(key, "controllerRightStickLook") == 0) c.controllerRightStickLook = b;
+    else if (strcmp(key, "controllerLogRealPad") == 0) c.controllerLogRealPad = b;
     else if (strcmp(key, "invertAimYaw")       == 0) c.invertAimYaw       = b;
     else if (strcmp(key, "invertAimPitch")     == 0) c.invertAimPitch     = b;
     else if (strcmp(key, "movieFlatEnabled")   == 0) c.movieFlatEnabled   = b;
@@ -470,6 +478,13 @@ void WriteProfileSection(FILE* f, const char* name, const VrConfig& c) noexcept
     }
     fprintf(f, "combatHeadAim = %d\n",      c.combatHeadAim ? 1 : 0);
     fprintf(f, "makoHeadAim = %d\n",        c.makoHeadAim ? 1 : 0);
+    fprintf(f, "controllerInput = %d\n",            c.controllerInput ? 1 : 0);
+    fprintf(f, "controllerAim = %d\n",              c.controllerAim ? 1 : 0);
+    fprintf(f, "controllerAimSmoothing = %.3f\n",   c.controllerAimSmoothing);
+    fprintf(f, "controllerAimHeadBlend = %.3f\n",   c.controllerAimHeadBlend);
+    fprintf(f, "controllerTriggerDeadzone = %.3f\n",c.controllerTriggerDeadzone);
+    fprintf(f, "controllerRightStickLook = %d\n",   c.controllerRightStickLook ? 1 : 0);
+    fprintf(f, "controllerLogRealPad = %d\n",       c.controllerLogRealPad ? 1 : 0);
     fprintf(f, "invertAimYaw = %d\n",       c.invertAimYaw ? 1 : 0);
     fprintf(f, "invertAimPitch = %d\n",     c.invertAimPitch ? 1 : 0);
     fprintf(f, "decoupledPitch = %d\n",     c.decoupledPitch ? 1 : 0);

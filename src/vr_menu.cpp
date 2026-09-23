@@ -7,6 +7,7 @@
 #include "xr_session.h"
 #include "pchud.h"
 #include "head_aim.h"   // [DECOUPLEMENU] ReadGameModeSEH: 7 = full-screen GUI
+#include "xr_input.h"   // Stage 1: controller input (M0: menu section only)
 
 #include <Windows.h>
 #include <Xinput.h>
@@ -1015,6 +1016,34 @@ void BuildUI() noexcept
                 ImGui::Separator();
                 ImGui::Checkbox("EXPERIMENTAL: Mako head aim", &c.makoHeadAim);
                 ResetBtn("makoHeadAim", c.makoHeadAim, kDefaults.makoHeadAim);
+            }
+
+            // ---- Controller Input (Stage 1, 2026-09-23) ----
+            // All OFF by default. M0: the section + config keys exist so the first run
+            // exercises the XrInput module (Init/OnFrame) and logs the loader generation.
+            // Aim swap (M1) and virtual gamepad synthesis (M2) are wired in later commits.
+            if (ImGui::CollapsingHeader("Controller Input (Stage 1)", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                ImGui::Checkbox("Enable controller input (virtual gamepad)", &c.controllerInput);
+                ResetBtn("controllerInput", c.controllerInput, kDefaults.controllerInput);
+                ImGui::TextDisabled("Trigger=fire, grips=L1/R1, stick clicks=L3/R3, face=A/B/X/Y, dpad, left stick=move.");
+                ImGui::Checkbox("Aim with right controller", &c.controllerAim);
+                ResetBtn("controllerAim", c.controllerAim, kDefaults.controllerAim);
+                ImGui::TextDisabled("Controller ray drives the crosshair (same ControlRotation write as head aim).");
+                ImGui::SetNextItemWidth(ControlWidth());
+                ImGui::SliderFloat("Aim smoothing", &c.controllerAimSmoothing, 0.0f, 0.9f, "%.2f");
+                ResetBtn("controllerAimSmoothing", c.controllerAimSmoothing, kDefaults.controllerAimSmoothing);
+                ImGui::SetNextItemWidth(ControlWidth());
+                ImGui::SliderFloat("Aim head blend (0=controller, 1=head)", &c.controllerAimHeadBlend, 0.0f, 1.0f, "%.2f");
+                ResetBtn("controllerAimHeadBlend", c.controllerAimHeadBlend, kDefaults.controllerAimHeadBlend);
+                ImGui::SetNextItemWidth(ControlWidth());
+                ImGui::SliderFloat("Trigger deadzone", &c.controllerTriggerDeadzone, 0.0f, 0.5f, "%.2f");
+                ResetBtn("controllerTriggerDeadzone", c.controllerTriggerDeadzone, kDefaults.controllerTriggerDeadzone);
+                ImGui::Checkbox("Right stick drives look (off = head owns look)", &c.controllerRightStickLook);
+                ResetBtn("controllerRightStickLook", c.controllerRightStickLook, kDefaults.controllerRightStickLook);
+                ImGui::Checkbox("Log real gamepad (mapping discovery, 2 Hz)", &c.controllerLogRealPad);
+                ResetBtn("controllerLogRealPad", c.controllerLogRealPad, kDefaults.controllerLogRealPad);
+                ImGui::TextDisabled("Verify button->action mapping vs ME1 XInput binds - see docs/STAGE1_CONTROLLER_DESIGN.md 11.");
             }
 
             // ---- Conversations & Cutscenes: [CINEVR2 2026-07-18, final shape] flat screen

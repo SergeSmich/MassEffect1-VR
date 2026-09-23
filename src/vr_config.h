@@ -88,6 +88,22 @@ struct VrConfig
     // not ControlRotation) while the chase camera stays put. Default OFF; live write-experiment, units TBD.
     bool  makoHeadAim      = true;   // Baked ON (cannon follows head)
 
+    // ---- Stage 1: VR controller input (2026-09-23; ALL OFF by default) -------
+    // Virtual gamepad: the XInput hook (vr_menu.cpp) synthesizes a pad state from
+    // the OpenXR controllers (xr_input.cpp). Fail-safe: no/lost controllers ->
+    // real-pad passthrough, i.e. exactly the pre-Stage-1 behaviour.
+    bool  controllerInput = false;
+    // Controller aim: the right controller ray drives ControlRotation through the
+    // head-aim write path (xr_session.cpp swaps the aim SOURCE at the two
+    // DriveAimWithHead call sites). No new game-object write is introduced.
+    // The view stays head-stable; the camera follows the ray (on-foot).
+    bool  controllerAim = false;
+    float controllerAimSmoothing = 0.35f;   // low-pass on the aim quat (0 = raw ray)
+    float controllerAimHeadBlend = 0.0f;    // slerp head<->ray: 0 = pure controller, 1 = pure head
+    float controllerTriggerDeadzone = 0.15f;
+    bool  controllerRightStickLook = false; // true = mirror the right stick to sThumbRX/RY
+    bool  controllerLogRealPad = false;     // 2 Hz log of the REAL XInput state (mapping discovery)
+
     // First-run onboarding: false until the user dismisses the welcome / HDR-off notice once (then saved =1
     // so it never nags again). Fresh installs have no key -> defaults false -> the welcome shows once.
     bool  firstRunDone     = false;
