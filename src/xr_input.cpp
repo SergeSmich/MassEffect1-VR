@@ -196,6 +196,14 @@ XrQuaternionf QuatNormalize(const XrQuaternionf& q) noexcept
     return r;
 }
 
+// Compatibility for a runtime/profile whose useful controller ray is local +Z
+// instead of the OpenXR aim-pose convention local -Z. This is q * Ry(180°):
+// it reverses the forward ray while preserving the controller's local up axis.
+XrQuaternionf QuatFlipForward(const XrQuaternionf& q) noexcept
+{
+    return QuatNormalize({-q.z, q.w, -q.y, -q.x});
+}
+
 bool QuatNearlyIdentity(const XrQuaternionf& q) noexcept
 {
     // q and -q represent the same identity rotation. This is deliberately a
@@ -682,6 +690,8 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
         XrQuaternionf controllerOrientation = useGripFallback
                                              ? g_frame.right.gripPoseOrientation
                                              : g_frame.right.poseOrientation;
+        if (cfg.controllerAimFlipForward)
+            controllerOrientation = QuatFlipForward(controllerOrientation);
         XrQuaternionf target = controllerOrientation;
         if (cfg.controllerAimHeadBlend > 0.001f)
             target = QuatSlerp(headQuat, target, cfg.controllerAimHeadBlend);
@@ -731,6 +741,7 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
                     std::to_string(g_frame.right.gripPoseOrientation.z) + "," +
                     std::to_string(g_frame.right.gripPoseOrientation.w) +") source=" +
                     (useGripFallback ? "grip-fallback" : "aim") +
+                    " forwardFlip=" + (cfg.controllerAimFlipForward ? "1" : "0") +
                     " targetDeg=(" + std::to_string(targetYaw) + "," +
                     std::to_string(targetPitch) + ") smoothedDeg=(" +
                     std::to_string(g_frame.aimYawDeg) + "," +

@@ -252,6 +252,7 @@ void ApplyKeyValue(VrConfig& c, const char* key, double val) noexcept
     else if (strcmp(key, "makoHeadAim")        == 0) c.makoHeadAim        = b;
     else if (strcmp(key, "controllerInput") == 0) c.controllerInput = b;
     else if (strcmp(key, "controllerAim") == 0) c.controllerAim = b;
+    else if (strcmp(key, "controllerAimFlipForward") == 0) c.controllerAimFlipForward = b;
     else if (strcmp(key, "controllerRightStickLook") == 0) c.controllerRightStickLook = b;
     else if (strcmp(key, "controllerLogRealPad") == 0) c.controllerLogRealPad = b;
     else if (strcmp(key, "invertAimYaw")       == 0) c.invertAimYaw       = b;
@@ -480,6 +481,7 @@ void WriteProfileSection(FILE* f, const char* name, const VrConfig& c) noexcept
     fprintf(f, "makoHeadAim = %d\n",        c.makoHeadAim ? 1 : 0);
     fprintf(f, "controllerInput = %d\n",            c.controllerInput ? 1 : 0);
     fprintf(f, "controllerAim = %d\n",              c.controllerAim ? 1 : 0);
+    fprintf(f, "controllerAimFlipForward = %d\n",    c.controllerAimFlipForward ? 1 : 0);
     fprintf(f, "controllerAimSmoothing = %.3f\n",   c.controllerAimSmoothing);
     fprintf(f, "controllerAimHeadBlend = %.3f\n",   c.controllerAimHeadBlend);
     fprintf(f, "controllerTriggerDeadzone = %.3f\n",c.controllerTriggerDeadzone);

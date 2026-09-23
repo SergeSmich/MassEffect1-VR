@@ -1046,6 +1046,9 @@ void BuildUI() noexcept
                 ImGui::Checkbox("Aim with right controller", &c.controllerAim);
                 ResetBtn("controllerAim", c.controllerAim, kDefaults.controllerAim);
                 ImGui::TextDisabled("Controller ray drives the crosshair (same ControlRotation write as head aim).");
+                ImGui::Checkbox("Compatibility: flip controller forward axis", &c.controllerAimFlipForward);
+                ResetBtn("controllerAimFlipForward", c.controllerAimFlipForward, kDefaults.controllerAimFlipForward);
+                ImGui::TextDisabled("Use when the runtime's aim pose points backward; official OpenXR -Z is default.");
                 ImGui::SetNextItemWidth(ControlWidth());
                 ImGui::SliderFloat("Aim smoothing", &c.controllerAimSmoothing, 0.0f, 0.9f, "%.2f");
                 ResetBtn("controllerAimSmoothing", c.controllerAimSmoothing, kDefaults.controllerAimSmoothing);

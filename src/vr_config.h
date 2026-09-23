@@ -98,6 +98,11 @@ struct VrConfig
     // DriveAimWithHead call sites). No new game-object write is introduced.
     // The view stays head-stable; the camera follows the ray (on-foot).
     bool  controllerAim = false;
+    // Compatibility for runtimes that expose the controller's +Z as the useful
+    // forward ray even though OpenXR aim/pose convention is -Z. Off preserves
+    // the official OpenXR interpretation; on flips the local forward axis 180°
+    // around local up without changing the HMD or game-memory aim path.
+    bool  controllerAimFlipForward = false;
     float controllerAimSmoothing = 0.35f;   // low-pass on the aim quat (0 = raw ray)
     float controllerAimHeadBlend = 0.0f;    // slerp head<->ray: 0 = pure controller, 1 = pure head
     float controllerTriggerDeadzone = 0.15f;
