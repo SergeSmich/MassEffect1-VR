@@ -4064,7 +4064,20 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
             // falls through into the normal on-foot aim path. When controller aim is requested, require a
             // currently valid right-hand aim pose before entering this branch; otherwise fall back to the
             // ordinary head-look path instead of pinning the camera while the controller is lost.
-            const bool controllerAimReady = !cfg.controllerAim || MELEVR::XrInput::AimActive();
+            const bool controllerAimActive = cfg.controllerAim && MELEVR::XrInput::AimActive();
+            static bool s_controllerAimSource = false;
+            if (controllerAimActive != s_controllerAimSource)
+            {
+                // DriveAimWithHead is additive and keeps a previous source's
+                // reference/injection. Remove that injection before latching
+                // the new source, otherwise enabling the controller can add a
+                // one-frame fixed offset (the reported ~45 degree jump).
+                if (g_headAimActive) ReleaseHeadAim(ctrlLive && ctrlStable);
+                s_controllerAimSource = controllerAimActive;
+                LogLine(std::string("[HEADAIM] source -> ") +
+                        (controllerAimActive ? "controller" : "head"));
+            }
+            const bool controllerAimReady = !cfg.controllerAim || controllerAimActive;
             const bool aimGatesPass = cfg.combatHeadAim && weaponOut && !isStorm && !forceFlatCine &&
                                       ctrlLive && ctrlStable && gameMode != 1 && controllerAimReady;
             if (aimGatesPass)
@@ -4074,7 +4087,9 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                 // controller frame is unavailable, GetAimDeg leaves the head
                 // source in place: fail-safe is the old head-aim behaviour.
                 float aimSrcYaw = yawDeg, aimSrcPitch = pitchDeg;
-                const bool controllerAimActive = MELEVR::XrInput::GetAimDeg(&aimSrcYaw, &aimSrcPitch);
+                // The source gate above already verified a valid controller
+                // frame; GetAimDeg still owns the output write/fail-safe check.
+                const bool aimSourceAvailable = MELEVR::XrInput::GetAimDeg(&aimSrcYaw, &aimSrcPitch);
                 yawDegForLog = aimSrcYaw;
                 pitchDegForLog = aimSrcPitch;
                 const float aimYaw = cfg.invertAimYaw ? -aimSrcYaw : aimSrcYaw;
@@ -4090,7 +4105,7 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                 // remainder is still rendered as head-look so the two halves sum
                 // to the full offset while ControlRotation glides to the gaze.
                 // It also keeps [MOVEFIX] consistent via HeadLookYawUU.
-                if (controllerAimActive)
+                if (aimSourceAvailable)
                 {
                     // Controller aim changes only the game-aim source. Keep
                     // render-side head look active so the view remains
