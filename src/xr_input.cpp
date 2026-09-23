@@ -11,7 +11,7 @@
 //  - The action table includes the two aim poses, one optional right grip pose,
 //    and the 2x13 button/axis actions.
 //  - Action-state API: OpenXR has xrSyncActions(session, XrActionsSyncInfo*)
-//    and xrGetActionState{Boolean,Float,Vector2f}(session, ...) - there is no
+//    and xrGetActionState{Pose,Boolean,Float,Vector2f}(session, ...) - there is no
 //    "xrSyncInputs"/"xrUpdateActionState". The draft resolved non-existent
 //    names and would have failed in Init(). The bundled openxr_loader.dll's
 //    string table was checked: it carries exactly these names (1.0 generation,
@@ -159,6 +159,7 @@ struct Fn
     PFN_xrSuggestInteractionProfileBindings   suggestBindings = nullptr;
     PFN_xrAttachSessionActionSets             attachSets = nullptr;
     PFN_xrSyncActions                         syncActions = nullptr;
+    PFN_xrGetActionStatePose                 getActionStatePose = nullptr;
     PFN_xrGetActionStateBoolean               getActionStateBoolean = nullptr;
     PFN_xrGetActionStateFloat                 getActionStateFloat = nullptr;
     PFN_xrGetActionStateVector2f              getActionStateVector2f = nullptr;
@@ -306,6 +307,16 @@ bool EnsureSessionObjects() noexcept
 }
 
 // ---- action state readers (session-based; subactionPath = INVALID) -------------
+bool ReadPoseActive(XrAction a) noexcept
+{
+    XrActionStateGetInfo gi = {};
+    gi.type = XR_TYPE_ACTION_STATE_GET_INFO_VALUE;
+    gi.action = a;
+    XrActionStatePose st = {};
+    st.type = XR_TYPE_ACTION_STATE_POSE_VALUE;
+    return XrSucceeded(g_fn.getActionStatePose(g_session, &gi, &st)) && st.isActive != 0;
+}
+
 void ReadFloat(XrAction a, float* out) noexcept
 {
     XrActionStateGetInfo gi = {};
@@ -435,6 +446,7 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
     TRY_R("xrSuggestInteractionProfileBindings", suggestBindings);
     TRY_R("xrAttachSessionActionSets", attachSets);
     TRY_R("xrSyncActions", syncActions);
+    TRY_R("xrGetActionStatePose", getActionStatePose);
     TRY_R("xrGetActionStateBoolean", getActionStateBoolean);
     TRY_R("xrGetActionStateFloat", getActionStateFloat);
     TRY_R("xrGetActionStateVector2f", getActionStateVector2f);
@@ -453,7 +465,7 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
     g_fn.ready = true;
     LogLine("[XRINPUT] loader gen probe: 1.0-generation action API fully resolved "
             "(createActionSet/createAction/suggestBindings/attachSessionActionSets/"
-            "syncActions/getActionState{Boolean,Float,Vector2f}/createActionSpace/locateSpace)");
+            "syncActions/getActionState{Pose,Boolean,Float,Vector2f}/createActionSpace/locateSpace)");
 
     // ---- action set (instance-level, created once) ----
     XrActionSetCreateInfo asi = {};
@@ -598,9 +610,29 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
     si.activeActionSets = &aas;
     if (!XrSucceeded(g_fn.syncActions(g_session, &si))) return;
 
-    // 2) locate both hands against the app space (same basis as the head pose)
-    auto locateHand = [&](XrSpace space, HandFrame& out) noexcept -> bool
+    // Pose actions have their own active state. A pose action space can still
+    // exist while its action is inactive, in which case locating it may return
+    // a misleading identity pose (or a stale position). Query the official
+    // state first and only locate an action space when that action is active.
+    const bool rightAimActive = ReadPoseActive(g_actions[A_RIGHT_POSE]);
+    const bool rightGripActive = (g_rightGripSpace != nullptr) &&
+                                 ReadPoseActive(g_actions[A_RIGHT_GRIP_POSE]);
+    const bool leftPoseActive = ReadPoseActive(g_actions[A_LEFT_POSE]);
+    static uint64_t s_lastPoseStateLogMs = 0;
+    const uint64_t poseStateNowMs = static_cast<uint64_t>(GetTickCount64());
+    if (poseStateNowMs - s_lastPoseStateLogMs >= 1000)
     {
+        s_lastPoseStateLogMs = poseStateNowMs;
+        LogLine(std::string("[XRINPUT] pose states: aimActive=") +
+                (rightAimActive ? "1" : "0") + " gripActive=" +
+                (rightGripActive ? "1" : "0") + " leftActive=" +
+                (leftPoseActive ? "1" : "0"));
+    }
+
+    // 2) locate both hands against the app space (same basis as the head pose)
+    auto locateHand = [&](XrSpace space, bool active, HandFrame& out) noexcept -> bool
+    {
+        if (space == nullptr || !active) return false;
         XrSpaceLocation loc = {};
         loc.type = XR_TYPE_SPACE_LOCATION_VALUE;
         if (!XrSucceeded(g_fn.locateSpace(space, appSpace, displayTime, &loc))) return false;
@@ -612,12 +644,12 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
         out.posePosition = loc.pose.position;
         return true;
     };
-    g_frame.rightConnected = locateHand(g_rightSpace, g_frame.right);
-    g_frame.leftConnected = locateHand(g_leftSpace, g_frame.left);
-    if (g_rightGripSpace != nullptr)
+    g_frame.rightConnected = locateHand(g_rightSpace, rightAimActive, g_frame.right);
+    g_frame.leftConnected = locateHand(g_leftSpace, leftPoseActive, g_frame.left);
+    if (rightGripActive)
     {
         HandFrame gripFrame = {};
-        if (locateHand(g_rightGripSpace, gripFrame))
+        if (locateHand(g_rightGripSpace, true, gripFrame))
         {
             g_frame.right.gripPoseValid = true;
             g_frame.right.gripPoseOrientation = gripFrame.poseOrientation;

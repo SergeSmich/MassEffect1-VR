@@ -213,6 +213,7 @@ struct XrActiveActionSet { XrActionSet actionSet; XrPath subactionPath; };
 struct XrActionsSyncInfo { XrStructureType type; const void* next; uint32_t countActiveActionSets; const XrActiveActionSet* activeActionSets; };
 struct XrActionStateGetInfo { XrStructureType type; const void* next; XrAction action; XrPath subactionPath; };
 struct XrSpaceLocation { XrStructureType type; void* next; uint64_t locationFlags; XrPosef pose; };
+struct XrActionStatePose { XrStructureType type; void* next; XrBool32 isActive; };
 struct XrActionStateBoolean { XrStructureType type; void* next; XrBool32 currentState; XrBool32 changedSinceLastSync; XrTime lastChangeTime; XrBool32 isActive; };
 struct XrActionStateFloat { XrStructureType type; void* next; float currentState; XrBool32 changedSinceLastSync; XrTime lastChangeTime; XrBool32 isActive; };
 struct XrActionStateVector2f { XrStructureType type; void* next; XrVector2f currentState; XrBool32 changedSinceLastSync; XrTime lastChangeTime; XrBool32 isActive; };
@@ -227,6 +228,7 @@ using PFN_xrAttachSessionActionSets = XrResult (*)(XrSession, const XrSessionAct
 // NOTE: the action-state API is xrSyncActions + xrGetActionState* (takes the SESSION,
 // not the instance). There is no "xrSyncInputs"/"xrUpdateActionState" in OpenXR.
 using PFN_xrSyncActions = XrResult (*)(XrSession, const XrActionsSyncInfo*);
+using PFN_xrGetActionStatePose = XrResult (*)(XrSession, const XrActionStateGetInfo*, XrActionStatePose*);
 using PFN_xrGetActionStateBoolean = XrResult (*)(XrSession, const XrActionStateGetInfo*, XrActionStateBoolean*);
 using PFN_xrGetActionStateFloat = XrResult (*)(XrSession, const XrActionStateGetInfo*, XrActionStateFloat*);
 using PFN_xrGetActionStateVector2f = XrResult (*)(XrSession, const XrActionStateGetInfo*, XrActionStateVector2f*);
