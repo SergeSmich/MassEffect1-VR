@@ -276,7 +276,8 @@ bool EnsureSessionObjects() noexcept
     XrActionSpaceCreateInfo sci = {};
     sci.type = XR_TYPE_ACTION_SPACE_CREATE_INFO_VALUE;
     sci.subactionPath = 0;               // XR_PATH_INVALID
-    sci.poseInActionSpace = {};          // identity
+    sci.poseInActionSpace = {};
+    sci.poseInActionSpace.orientation.w = 1.0f; // identity quaternion
     sci.action = g_actions[A_RIGHT_POSE];
     if (!XrSucceeded(g_fn.createActionSpace(g_session, &sci, &g_rightSpace)))
     {
@@ -718,9 +719,18 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
             QuatYawPitchDeg(target, targetYaw, targetPitch);
             s_lastAimLogMs = nowMs;
             LogLine("[XRINPUT] aim pose rawDeg=(" + std::to_string(rawYaw) + "," +
-                    std::to_string(rawPitch) + ") gripDeg=(" +
+                    std::to_string(rawPitch) + ") rawQuat=(" +
+                    std::to_string(g_frame.right.poseOrientation.x) + "," +
+                    std::to_string(g_frame.right.poseOrientation.y) + "," +
+                    std::to_string(g_frame.right.poseOrientation.z) + "," +
+                    std::to_string(g_frame.right.poseOrientation.w) + ") gripDeg=(" +
                     std::to_string(gripYaw) + "," + std::to_string(gripPitch) +
-                    ") source=" + (useGripFallback ? "grip-fallback" : "aim") +
+                    ") gripQuat=(" +
+                    std::to_string(g_frame.right.gripPoseOrientation.x) + "," +
+                    std::to_string(g_frame.right.gripPoseOrientation.y) + "," +
+                    std::to_string(g_frame.right.gripPoseOrientation.z) + "," +
+                    std::to_string(g_frame.right.gripPoseOrientation.w) +") source=" +
+                    (useGripFallback ? "grip-fallback" : "aim") +
                     " targetDeg=(" + std::to_string(targetYaw) + "," +
                     std::to_string(targetPitch) + ") smoothedDeg=(" +
                     std::to_string(g_frame.aimYawDeg) + "," +
