@@ -1,0 +1,132 @@
+# PATCH: src/xr_session.cpp  (4 вставки; всё остальное не трогаем)
+#
+# Интеграция: после вставки сделать `#include "xr_input.h"` в шапке файла.
+
+================================================================================
+(A) Init - один раз, после создания session и reference spaces
+    (якорь: блок создания g_viewSpace в TryCreateSession, ~строка 648-651:
+     `r = g_fn.createReferenceSpace(g_session, &vrci, &g_viewSpace);`
+      и сразу за ним лог "view space created" - вставить ПОСЛЕ этого блока)
+================================================================================
+
+    // Stage 1: VR controller input. Self-contained (resolves its own loader
+    // functions through g_getProc). Fail-safe: on failure the feature is simply
+    // off - current behaviour unchanged.
+    if (MELEVR::XrInput::Init(g_instance, g_session, g_getProc))
+    {
+        LogLine("[XR] controller input module initialized");
+    }
+    else
+    {
+        LogLine("[XR] controller input module init failed - feature disabled (fail-safe)");
+    }
+
+
+================================================================================
+(B) OnFrame - per-frame sync; якорь: в фрейм-лупе, МЕЖДУ вычислением
+    headQuatForFrame (строка 3828: `const XrQuaternionf headQuatForFrame =`)
+    и блоком "WEAPON-STATE SWITCH" (строка 3935: `const int weaponMode =
+    MELEVR::HeadAim::ReadWeaponModeSEH();`). g_appSpace = LOCAL re-origined
+    space ("locate + submit happen against this") - те же координаты, что и
+    поза головы. displayTime = fs.predictedDisplayTime (как у LocateHead, 3790).
+================================================================================
+
+    // Stage 1: controller input frame (same thread/timebase as the head pose).
+    // Publishes the aim source + virtual-pad state; no-op when not ready.
+    if (MELEVR::XrInput::IsReady())
+        MELEVR::XrInput::OnFrame(g_appSpace, fs.predictedDisplayTime, headQuatForFrame);
+
+
+================================================================================
+(C) Aim source, ON-FOOT branch (блок `aimGatesPass`, ~строки 4005-4030;
+    headQuatForFrame в этой точке уже существует)
+    Заменяем ТОЛЬКО источник углов; запись DriveAimWithHead не меняется.
+    ТЕКУЩИЙ КОД:
+        const float aimYaw = cfg.invertAimYaw ? -yawDeg : yawDeg;
+        float aimPitch = cfg.invertAimPitch ? -pitchDeg : pitchDeg;
+        DriveAimWithHead(aimYaw, aimPitch);
+    СТАНОВИТСЯ:
+================================================================================
+
+                // Stage 1: aim source = right controller ray (cfg.controllerAim)
+                // or the head (current behaviour). Same sanctioned write either way.
+                // GetAimDeg only writes its outputs on success - on failure the
+                // head angles below stay in place (fail-safe).
+                float aimSrcYaw = yawDeg, aimSrcPitch = pitchDeg;
+                MELEVR::XrInput::GetAimDeg(&aimSrcYaw, &aimSrcPitch);
+                const float aimYaw = cfg.invertAimYaw ? -aimSrcYaw : aimSrcYaw;
+                float aimPitch = cfg.invertAimPitch ? -aimSrcPitch : aimSrcPitch;
+                DriveAimWithHead(aimYaw, aimPitch);
+
+    // И render-side look в том же блоке: ТЕКУЩЕЕ
+        if (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0)
+            MELEVR::RenderHook::SetHeadLook(-g_seedRemYawUU, g_seedRemPitchUU, true);
+        else
+            MELEVR::RenderHook::SetHeadLook(0, 0, false);   // aim owns the rotation
+    // СТАНОВИТСЯ (controller aim: картинка следует за ГОЛОВОЙ, прицел - за лучом):
+        if (cfg.controllerAim && MELEVR::XrInput::AimActive())
+        {
+            // View stays head-stable while the camera follows the controller ray.
+            // TODO(integration): hoist the explore-branch head-look expression
+            // (the yawSign/pitchSign/sensitivity block at `if (!aimDriven)` below,
+            // ~4050) into a small helper HeadLookAngles(yawDeg, pitchDeg, cfg) and
+            // call it here - same convention, no duplication.
+            // SetHeadLook(<head-look yaw UU>, <head-look pitch UU>, true);
+            MELEVR::RenderHook::SetHeadLook(0, 0, false);   // draft: view pinned (safe fallback)
+        }
+        else if (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0)
+            MELEVR::RenderHook::SetHeadLook(-g_seedRemYawUU, g_seedRemPitchUU, true);
+        else
+            MELEVR::RenderHook::SetHeadLook(0, 0, false);   // aim owns the rotation
+
+    // ДРАФТ-НОТА: пока хелпер не вынесен, controller aim работает с зафиксированным
+    // view (прицел двигается, картинка нет) - функционально корректно, на комфорт
+    // влияет. Вынесение хелпера = 10 минут при интеграции.
+
+
+================================================================================
+(D) Aim source, MAKO branch (ветка `else if (gameMode == 1)`, якорь - условие
+    `if (cfg.makoHeadAim && cfg.combatHeadAim && headValid && !forceFlatCine
+    && ctrlLive && ctrlStable)`, ~строка 3895)
+    ТЕКУЩИЙ КОД:
+        float yawDeg = 0.0f, pitchDeg = 0.0f, rollDeg = 0.0f;
+        HeadEulerDegrees(g_subViews[0].pose.orientation, yawDeg, pitchDeg, rollDeg);
+        ...
+        const float aimYaw = cfg.invertAimYaw ? -yawDeg : yawDeg;
+        const float aimPitch = cfg.invertAimPitch ? -pitchDeg : pitchDeg;
+        DriveAimWithHead(aimYaw, aimPitch);
+    СТАНОВИТСЯ (тот же swap источника):
+================================================================================
+
+        float yawDeg = 0.0f, pitchDeg = 0.0f, rollDeg = 0.0f;
+        HeadEulerDegrees(g_subViews[0].pose.orientation, yawDeg, pitchDeg, rollDeg);
+        // Stage 1: controller ray drives the cannon when on (no-op otherwise).
+        float makoAimYaw = yawDeg, makoAimPitch = pitchDeg;
+        MELEVR::XrInput::GetAimDeg(&makoAimYaw, &makoAimPitch);
+        yawDegForLog = makoAimYaw;
+        pitchDegForLog = makoAimPitch;
+        const float aimYaw = cfg.invertAimYaw ? -makoAimYaw : makoAimYaw;
+        const float aimPitch = cfg.invertAimPitch ? -makoAimPitch : makoAimPitch;
+        DriveAimWithHead(aimYaw, aimPitch);
+
+    // Условие ветки расширяем: `if (cfg.makoHeadAim && cfg.combatHeadAim && ...)`
+    // оставляем как есть (combatHeadAim - общий гейт "голова/луч целит";
+    // controllerAim управляет ИСТОЧНИКОМ, не гейтом).
+
+================================================================================
+(E) PollEvents() - сброс session-bound объектов при выходе из RUNNING
+    Якорь (строки 682-686):
+        else if (g_sessionState == XR_SESSION_STATE_STOPPING_VALUE)
+        {
+            g_fn.endSession(g_session);
+            g_sessionRunning = false;
+        }
+    ВСТАВЛЯЕМ одну строку:
+================================================================================
+
+        else if (g_sessionState == XR_SESSION_STATE_STOPPING_VALUE)
+        {
+            g_fn.endSession(g_session);
+            g_sessionRunning = false;
+            MELEVR::XrInput::SessionInvalidated();   // Stage 1: drop action spaces (recreated on next RUNNING)
+        }

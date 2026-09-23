@@ -1,0 +1,14 @@
+# PATCH: src/MELEVRClean.vcxproj
+# Добавить в секцию <ItemGroup> с ClCompile (рядом с d3d_capture.cpp и т.д.):
+
+      <ClCompile Include="xr_input.cpp" />
+
+# Добавить в секцию <ItemGroup> с ClInclude (рядом с xr_session.h и т.д.):
+
+      <ClInclude Include="xr_input.h" />
+
+# Ничего больше менять не нужно:
+#  - xr_input.cpp включает <Xinput.h> только ради типов (XINPUT_STATE) и НЕ
+#    линкует xinput.lib (как и весь проект - XInput резолвится динамически);
+#  - новые PFN/константы живут в xr_types.h (уже в проекте);
+#  - openxr_loader.dll не меняется (функции резолвятся через xrGetInstanceProcAddr).

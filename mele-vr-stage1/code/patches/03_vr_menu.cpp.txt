@@ -1,0 +1,108 @@
+# PATCH: src/vr_menu.cpp  (2 вставки; после них добавить #include "xr_input.h")
+
+================================================================================
+(A) Хук XInput - синтез виртуального геймпада
+    Файл уже включает <Xinput.h>. МЕНЯЕМ оба хука (HookedXInputGetState ~180 и
+    HookedXInputGetStateEx ~207) - они структурно идентичны, ниже показан один.
+
+    ТЕКУЩИЙ КОД (общая часть обоих хуков):
+        DWORD WINAPI HookedXInputGetState(DWORD idx, XINPUT_STATE* state) noexcept
+        {
+            const DWORD r = g_origXInput ? g_origXInput(idx, state) : ERROR_DEVICE_NOT_CONNECTED;
+            CaptureLeftStick(state, r, idx);
+            DetectRecenterCombo(state, r, idx);
+            if (state != nullptr)
+            {
+                if (g_open)
+                {
+                    ZeroMemory(&state->Gamepad, sizeof(XINPUT_GAMEPAD));  // neutral while menu open
+                }
+                else
+                {
+                    const auto& c = MELEVR::Config::Get();
+                    const bool menuUi = MenuOwnsLook();
+                    if (c.decoupledPitch && !menuUi) state->Gamepad.sThumbRY = 0;
+                    if (c.decoupledYaw   && !menuUi) state->Gamepad.sThumbRX = 0;
+                    if (c.moveFollowsHead) RotateMoveStickByHeadLook(&state->Gamepad);
+                }
+            }
+            return r;
+        }
+
+    СТАНОВИТСЯ:
+================================================================================
+
+        DWORD WINAPI HookedXInputGetState(DWORD idx, XINPUT_STATE* state) noexcept
+        {
+            const DWORD r = g_origXInput ? g_origXInput(idx, state) : ERROR_DEVICE_NOT_CONNECTED;
+            CaptureLeftStick(state, r, idx);
+            DetectRecenterCombo(state, r, idx);
+            MELEVR::XrInput::LogRealPadThrottled(state, r);   // Stage 1: mapping discovery (T4), no-op unless cfg on
+            bool synthesized = false;
+            if (state != nullptr)
+            {
+                if (g_open)
+                {
+                    ZeroMemory(&state->Gamepad, sizeof(XINPUT_GAMEPAD));  // neutral while menu open
+                }
+                else
+                {
+                    const auto& c = MELEVR::Config::Get();
+                    // Stage 1: virtual gamepad from the VR controllers. The synthesized
+                    // state then passes through the SAME corrections as the real pad
+                    // (decouple axes + move-follows-head stick rotation) - no duplication.
+                    if (c.controllerInput && MELEVR::XrInput::BuildVirtualGamepad(state, c))
+                    {
+                        synthesized = true;
+                        state->dwPacketNumber++;
+                    }
+                    const bool menuUi = MenuOwnsLook();
+                    if (c.decoupledPitch && !menuUi) state->Gamepad.sThumbRY = 0;
+                    if (c.decoupledYaw   && !menuUi) state->Gamepad.sThumbRX = 0;
+                    if (c.moveFollowsHead) RotateMoveStickByHeadLook(&state->Gamepad);
+                }
+            }
+            // Stage 1: while synthesizing the game must see a CONNECTED pad even when no
+            // physical pad is plugged in (r can be ERROR_DEVICE_NOT_CONNECTED).
+            return synthesized ? ERROR_SUCCESS : r;
+        }
+
+    HookedXInputGetStateEx - идентичные правки (та же логика, свой read trampoline).
+
+    НЮАНС: BuildVirtualGamepad читает g_frame, опубликованный XrInput::OnFrame в том же
+    кадре (render thread, до Present) - порядок гарантирован фрейм-лупом (пункт B из
+    02_xr_session.cpp.txt идёт в OnPresent до отрисовки; XInput-поллинг игры происходит
+    в game-тике, и worst case - стейт на кадр старше. Для aim это неважно (aim пишется
+    из того же OnFrame), для триггера задержка на 1 кадр = норма VR-ввода.
+
+
+================================================================================
+(B) Меню - новая секция в вкладке Tracking
+    (якорь: ПОСЛЕ закрывающего `}` CollapsingHeader("Head Aim"), ~строка 1019,
+     ПЕРЕД `CollapsingHeader("Conversations & Cutscenes"`)
+================================================================================
+
+            // ---- Controller Input (Stage 1) ----
+            if (ImGui::CollapsingHeader("Controller Input (Stage 1)", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                ImGui::Checkbox("Enable controller input (virtual gamepad)", &c.controllerInput);
+                ResetBtn("controllerInput", c.controllerInput, kDefaults.controllerInput);
+                ImGui::TextDisabled("Trigger=fire, grips=L1/R1, stick clicks=L3/R3, face=A/B/X/Y, dpad, left stick=move.");
+                ImGui::Checkbox("Aim with right controller", &c.controllerAim);
+                ResetBtn("controllerAim", c.controllerAim, kDefaults.controllerAim);
+                ImGui::TextDisabled("Controller ray drives the crosshair (same ControlRotation write as head aim).");
+                ImGui::SetNextItemWidth(ControlWidth());
+                ImGui::SliderFloat("Aim smoothing", &c.controllerAimSmoothing, 0.0f, 0.9f, "%.2f");
+                ResetBtn("controllerAimSmoothing", c.controllerAimSmoothing, kDefaults.controllerAimSmoothing);
+                ImGui::SetNextItemWidth(ControlWidth());
+                ImGui::SliderFloat("Aim head blend (0=controller, 1=head)", &c.controllerAimHeadBlend, 0.0f, 1.0f, "%.2f");
+                ResetBtn("controllerAimHeadBlend", c.controllerAimHeadBlend, kDefaults.controllerAimHeadBlend);
+                ImGui::SetNextItemWidth(ControlWidth());
+                ImGui::SliderFloat("Trigger deadzone", &c.controllerTriggerDeadzone, 0.0f, 0.5f, "%.2f");
+                ResetBtn("controllerTriggerDeadzone", c.controllerTriggerDeadzone, kDefaults.controllerTriggerDeadzone);
+                ImGui::Checkbox("Right stick drives look (off = head owns look)", &c.controllerRightStickLook);
+                ResetBtn("controllerRightStickLook", c.controllerRightStickLook, kDefaults.controllerRightStickLook);
+                ImGui::Checkbox("Log real gamepad (mapping discovery, 2 Hz)", &c.controllerLogRealPad);
+                ResetBtn("controllerLogRealPad", c.controllerLogRealPad, kDefaults.controllerLogRealPad);
+                ImGui::TextDisabled("Verify button->action mapping vs ME1 XInput binds - see docs/STAGE1_CONTROLLER_DESIGN.md 11.");
+            }

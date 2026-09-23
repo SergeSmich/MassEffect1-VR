@@ -1,0 +1,56 @@
+# PATCH: src/vr_config.h  +  src/vr_config.cpp
+
+================================================================================
+(A) src/vr_config.h - новые поля
+    Якорь: ПОСЛЕ поля makoHeadAim (блок "Mako head-aim (EXPERIMENTAL)", ~строка 90,
+     `bool makoHeadAim = true;   // Baked ON (cannon follows head)`)
+================================================================================
+
+    // ---- Stage 1: VR controller input (2026-09-23; ALL OFF by default) -------
+    // Virtual gamepad: the XInput hook (vr_menu.cpp) synthesizes a pad state from
+    // the OpenXR controllers (xr_input.cpp). Fail-safe: no/lost controllers ->
+    // real-pad passthrough, i.e. exactly the pre-Stage-1 behaviour.
+    bool  controllerInput = false;
+    // Controller aim: the right controller ray drives ControlRotation through the
+    // head-aim write path (xr_session.cpp swaps the aim SOURCE at the two
+    // DriveAimWithHead call sites). No new game-object write is introduced.
+    // The view stays head-stable; the camera follows the ray (on-foot).
+    bool  controllerAim = false;
+    float controllerAimSmoothing = 0.35f;   // low-pass on the aim quat (0 = raw ray)
+    float controllerAimHeadBlend = 0.0f;    // slerp head<->ray: 0 = pure controller, 1 = pure head
+    float controllerTriggerDeadzone = 0.15f;
+    bool  controllerRightStickLook = false; // true = mirror the right stick to sThumbRX/RY
+    bool  controllerLogRealPad = false;     // 2 Hz log of the REAL XInput state (mapping discovery)
+
+
+================================================================================
+(B) src/vr_config.cpp - load (float-dispatcher, ~строка 239)
+    Якорь: рядом с `if (strcmp(key, "combatCamHoldGain") == 0) { c.combatCamHoldGain = v; return; }`
+================================================================================
+
+    if (strcmp(key, "controllerAimSmoothing") == 0) { c.controllerAimSmoothing = v; return; }
+    if (strcmp(key, "controllerAimHeadBlend") == 0) { c.controllerAimHeadBlend = v; return; }
+    if (strcmp(key, "controllerTriggerDeadzone") == 0) { c.controllerTriggerDeadzone = v; return; }
+
+================================================================================
+(C) src/vr_config.cpp - load (bool-цепочка, ~строка 248)
+    Якорь: рядом с `else if (strcmp(key, "makoHeadAim") == 0) c.makoHeadAim = b;`
+================================================================================
+
+    else if (strcmp(key, "controllerInput") == 0) c.controllerInput = b;
+    else if (strcmp(key, "controllerAim") == 0) c.controllerAim = b;
+    else if (strcmp(key, "controllerRightStickLook") == 0) c.controllerRightStickLook = b;
+    else if (strcmp(key, "controllerLogRealPad") == 0) c.controllerLogRealPad = b;
+
+================================================================================
+(D) src/vr_config.cpp - save (fprintf-блок, ~строки 472-480)
+    Якорь: рядом с `fprintf(f, "makoHeadAim = %d\n", c.makoHeadAim ? 1 : 0);`
+================================================================================
+
+    fprintf(f, "controllerInput = %d\n",        c.controllerInput ? 1 : 0);
+    fprintf(f, "controllerAim = %d\n",          c.controllerAim ? 1 : 0);
+    fprintf(f, "controllerAimSmoothing = %.3f\n", c.controllerAimSmoothing);
+    fprintf(f, "controllerAimHeadBlend = %.3f\n", c.controllerAimHeadBlend);
+    fprintf(f, "controllerTriggerDeadzone = %.3f\n", c.controllerTriggerDeadzone);
+    fprintf(f, "controllerRightStickLook = %d\n", c.controllerRightStickLook ? 1 : 0);
+    fprintf(f, "controllerLogRealPad = %d\n",    c.controllerLogRealPad ? 1 : 0);

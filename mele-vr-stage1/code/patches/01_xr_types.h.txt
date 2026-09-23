@@ -1,0 +1,63 @@
+# PATCH: src/xr_types.h  (только добавление; вставить в namespace MELEVR::Xr,
+# после блока "function-pointer typedefs" и ДО `struct Functions`)
+#
+# Источники значений:
+#  - хрендер-пробник мода (текущий xr_types.h, проверен на реальном шлеме) для 6..48;
+#  - Khronos openxr.h (cross-check main-ветка + tag release-1.0.34, значения совпадают)
+#    для action API: 23,24,25,27,28,29,38,42,51,58,60,61 + layout структур.
+#  См. docs/STAGE1_CONTROLLER_DESIGN.md раздел 9 (точки неопределённости 0.9-эры).
+
+// ---- Stage 1: VR controller input (OpenXR actions) ---------------------------
+using XrPath = uint64_t;
+using XrActionSet = struct XrActionSet_T*;
+using XrAction = struct XrAction_T*;
+
+constexpr int32_t XR_TYPE_ACTION_STATE_BOOLEAN_VALUE = 23;
+constexpr int32_t XR_TYPE_ACTION_STATE_FLOAT_VALUE = 24;
+constexpr int32_t XR_TYPE_ACTION_STATE_VECTOR2F_VALUE = 25;
+constexpr int32_t XR_TYPE_ACTION_STATE_POSE_VALUE = 27;
+constexpr int32_t XR_TYPE_ACTION_SET_CREATE_INFO_VALUE = 28;
+constexpr int32_t XR_TYPE_ACTION_CREATE_INFO_VALUE = 29;
+constexpr int32_t XR_TYPE_ACTION_SPACE_CREATE_INFO_VALUE = 38;
+constexpr int32_t XR_TYPE_SPACE_LOCATION_VALUE = 42;
+constexpr int32_t XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING_VALUE = 51;
+constexpr int32_t XR_TYPE_ACTION_STATE_GET_INFO_VALUE = 58;
+constexpr int32_t XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO_VALUE = 60;
+constexpr int32_t XR_TYPE_ACTIONS_SYNC_INFO_VALUE = 61;
+constexpr uint32_t XR_SPACE_LOCATION_ORIENTATION_VALID_BIT_VALUE = 0x1;
+constexpr uint32_t XR_SPACE_LOCATION_POSITION_VALID_BIT_VALUE = 0x2;
+// XrActionType (1.0 header): 0.9-эра = 0..3, см. дизайн-док 9 / Приложение А.
+constexpr int32_t XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE = 1;
+constexpr int32_t XR_ACTION_TYPE_FLOAT_INPUT_VALUE = 2;
+constexpr int32_t XR_ACTION_TYPE_VECTOR2F_INPUT_VALUE = 3;
+constexpr int32_t XR_ACTION_TYPE_POSE_INPUT_VALUE = 4;
+
+struct XrVector2f { float x; float y; };
+
+struct XrActionSetCreateInfo { XrStructureType type; const void* next; char actionSetName[64]; char localizedActionSetName[128]; uint32_t priority; };
+struct XrActionCreateInfo { XrStructureType type; const void* next; char actionName[64]; int32_t actionType; uint32_t countSubactionPaths; const XrPath* subactionPaths; char localizedActionName[128]; };
+struct XrActionSpaceCreateInfo { XrStructureType type; const void* next; XrAction action; XrPath subactionPath; XrPosef poseInActionSpace; };
+struct XrActionSuggestedBinding { XrAction action; XrPath binding; };
+struct XrInteractionProfileSuggestedBinding { XrStructureType type; const void* next; XrPath interactionProfile; uint32_t countSuggestedBindings; const XrActionSuggestedBinding* suggestedBindings; };
+struct XrSessionActionSetsAttachInfo { XrStructureType type; const void* next; uint32_t countActionSets; const XrActionSet* actionSets; };
+struct XrActionStateGetInfo { XrStructureType type; const void* next; XrAction action; XrPath subactionPath; };
+struct XrSpaceLocation { XrStructureType type; void* next; uint32_t locationFlags; XrPosef pose; };
+struct XrActionStateBoolean { XrStructureType type; void* next; XrBool32 currentState; XrBool32 changedSinceLastSync; XrTime lastChangeTime; XrBool32 isActive; };
+struct XrActionStateFloat { XrStructureType type; void* next; float currentState; XrBool32 changedSinceLastSync; XrTime lastChangeTime; XrBool32 isActive; };
+struct XrActionStateVector2f { XrStructureType type; void* next; XrVector2f currentState; XrBool32 changedSinceLastSync; XrTime lastChangeTime; XrBool32 isActive; };
+
+using PFN_xrStringToPath = XrResult (*)(XrInstance, const char*, XrPath*);
+using PFN_xrCreateActionSet = XrResult (*)(XrInstance, const XrActionSetCreateInfo*, XrActionSet*);
+using PFN_xrDestroyActionSet = XrResult (*)(XrActionSet);
+using PFN_xrCreateAction = XrResult (*)(XrActionSet, const XrActionCreateInfo*, XrAction*);
+using PFN_xrDestroyAction = XrResult (*)(XrAction);
+using PFN_xrSuggestInteractionProfileBindings = XrResult (*)(XrInstance, const XrInteractionProfileSuggestedBinding*);
+using PFN_xrAttachSessionActionSets = XrResult (*)(XrSession, const XrSessionActionSetsAttachInfo*);
+using PFN_xrSyncInputs = XrResult (*)(XrInstance, int64_t*, const XrAction*);
+using PFN_xrUpdateActionState = XrResult (*)(XrInstance, const XrActionStateGetInfo*, void*);
+using PFN_xrCreateActionSpace = XrResult (*)(XrSession, const XrActionSpaceCreateInfo*, XrSpace*);
+using PFN_xrLocateSpace = XrResult (*)(XrSpace, XrSpace, XrTime, XrSpaceLocation*);
+// (PFN_xrDestroySpace уже существует в файле - переиспользуем в xr_input.cpp)
+
+// ПРИМЕЧАНИЕ: в `struct Functions` ничего не добавляем - XrInput резолвит свои
+// функции сам через переданный в Init() getProc (модуль самодостаточен).
