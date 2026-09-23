@@ -4061,9 +4061,12 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
             }
             const bool isStorm = s_stormLatched;
             // Mako is handled in the gameMode==1 branch above. Keep this guard so a clean mode-byte read never
-            // falls through into the normal on-foot aim path.
+            // falls through into the normal on-foot aim path. When controller aim is requested, require a
+            // currently valid right-hand aim pose before entering this branch; otherwise fall back to the
+            // ordinary head-look path instead of pinning the camera while the controller is lost.
+            const bool controllerAimReady = !cfg.controllerAim || MELEVR::XrInput::AimActive();
             const bool aimGatesPass = cfg.combatHeadAim && weaponOut && !isStorm && !forceFlatCine &&
-                                      ctrlLive && ctrlStable && gameMode != 1;
+                                      ctrlLive && ctrlStable && gameMode != 1 && controllerAimReady;
             if (aimGatesPass)
             {
                 // Head or right-controller ray aims via the same sanctioned
