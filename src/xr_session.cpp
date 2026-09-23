@@ -2044,6 +2044,30 @@ XrQuaternionf QuatRemoveRoll(const XrQuaternionf& q) noexcept
 
 constexpr float kDegToUU = 65536.0f / 360.0f;
 
+// Convert the explore/head-look Euler expression to the render-hook units. This
+// is deliberately shared by ordinary explore look and controller aim: with a
+// controller ray driving ControlRotation, the rendered view must still follow
+// the HMD, not be pinned at zero. No game-memory write occurs here.
+struct HeadLookUU
+{
+    int32_t yaw = 0;
+    int32_t pitch = 0;
+};
+
+HeadLookUU HeadLookFromAngles(float yawDeg, float pitchDeg,
+                              const MELEVR::Config::VrConfig& cfg) noexcept
+{
+    const float yawSign = cfg.invertLookYaw ? +1.0f : -1.0f;
+    const float pitchSign = cfg.invertLookPitch ? -1.0f : +1.0f;
+    float dPitchDeg = pitchSign * pitchDeg * cfg.lookSensitivity;
+    if (dPitchDeg > 85.0f) dPitchDeg = 85.0f;
+    if (dPitchDeg < -85.0f) dPitchDeg = -85.0f;
+    return {
+        static_cast<int32_t>(yawSign * yawDeg * cfg.lookSensitivity * kDegToUU),
+        static_cast<int32_t>(dPitchDeg * kDegToUU)
+    };
+}
+
 // Normalized-lerp between two quaternions (shortest arc). Per-frame head deltas are tiny; nlerp is plenty.
 XrQuaternionf NlerpQuat(const XrQuaternionf& a, XrQuaternionf b, float t) noexcept
 {
@@ -2225,7 +2249,7 @@ void DriveAimWithHead(float headYawDeg, float headPitchDeg) noexcept
         g_appliedHeadYawUU = 0;
         g_appliedHeadPitchUU = 0;
         g_headAimActive = true;
-        LogLine(std::string("[HEADAIM] head aim ON (crosshair follows head, additive with stick)") +
+        LogLine(std::string("[HEADAIM] aim ON (current source, additive with stick)") +
                 (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0
                      ? " ramping in head-look offset yawUU=" + std::to_string(g_seedRemYawUU) +
                        " pitchUU=" + std::to_string(g_seedRemPitchUU) + "."
@@ -3845,10 +3869,9 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                                                                 : IdentityPose().orientation);
 
     // Stage 1: controller input frame (same thread/timebase as the head pose).
-    // Publishes the aim source + virtual-pad state; no-op when not ready. M0:
-    // consumers are OFF by default - this only syncs/locates and lets the first
-    // run log tracking status. Aim swap lands in M1 (below, at the two
-    // DriveAimWithHead sites); virtual-pad synthesis in M2 (vr_menu XInput hook).
+    // Publishes the right-ray aim source and virtual-pad snapshot; no-op when
+    // not ready. M1 consumes the ray below at the existing DriveAimWithHead
+    // site; virtual-pad synthesis remains deferred to M2 (vr_menu XInput hook).
     if (MELEVR::XrInput::IsReady())
         MELEVR::XrInput::OnFrame(g_appSpace, fs.predictedDisplayTime, headQuatForFrame);
 
@@ -4043,24 +4066,43 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
                                       ctrlLive && ctrlStable && gameMode != 1;
             if (aimGatesPass)
             {
-                // Head aims via ControlRotation (1:1, no sensitivity scaling). Invert flips the input sign.
-                const float aimYaw = cfg.invertAimYaw ? -yawDeg : yawDeg;
-                float aimPitch = cfg.invertAimPitch ? -pitchDeg : pitchDeg;
+                // Head or right-controller ray aims via the same sanctioned
+                // ControlRotation path (1:1, no sensitivity scaling). If the
+                // controller frame is unavailable, GetAimDeg leaves the head
+                // source in place: fail-safe is the old head-aim behaviour.
+                float aimSrcYaw = yawDeg, aimSrcPitch = pitchDeg;
+                const bool controllerAimActive = MELEVR::XrInput::GetAimDeg(&aimSrcYaw, &aimSrcPitch);
+                yawDegForLog = aimSrcYaw;
+                pitchDegForLog = aimSrcPitch;
+                const float aimYaw = cfg.invertAimYaw ? -aimSrcYaw : aimSrcYaw;
+                float aimPitch = cfg.invertAimPitch ? -aimSrcPitch : aimSrcPitch;
                 DriveAimWithHead(aimYaw, aimPitch);
-                // NOTE: orientation is left following the aim (SetHeadLook 0) so the camera CENTER still equals
-                // where the gun fires = the native reticle stays accurate. combatCamHold (below, in the view-
-                // offset block) cancels the camera's POSITION arc around Shepard instead - that's the part that
-                // makes "the world spin around him"; holding position while orientation tracks aim keeps the
-                // crosshair honest. (Step 1 counter-rotated orientation and broke the reticle - reverted.)
-                // [AIMSEED v2] during the look->aim handoff ramp, the untransferred remainder is still
-                // rendered as head-look (signs converted back: CR-right -> view-left, pitch 1:1) so the two
-                // halves always sum to the full offset = the view never moves while CR glides to the gaze.
-                // Also keeps [MOVEFIX] consistent (it steers by HeadLookYawUU = this remainder). Remainder
-                // exhausted (the normal case within ~0.3s) -> plain "aim owns the rotation", exactly as before.
-                if (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0)
+                // Native head aim normally leaves orientation following the aim
+                // (SetHeadLook 0), so the camera center and reticle stay aligned.
+                // Controller aim is the deliberate exception: its branch below
+                // keeps the render-side HMD look active while ControlRotation
+                // follows the right ray. combatCamHold (below, in the view-offset
+                // block) remains independent and only addresses the camera arc.
+                // [AIMSEED v2] during a head-look->aim handoff, the untransferred
+                // remainder is still rendered as head-look so the two halves sum
+                // to the full offset while ControlRotation glides to the gaze.
+                // It also keeps [MOVEFIX] consistent via HeadLookYawUU.
+                if (controllerAimActive)
+                {
+                    // Controller aim changes only the game-aim source. Keep
+                    // render-side head look active so the view remains
+                    // head-stable while the reticle follows the right ray.
+                    const HeadLookUU look = HeadLookFromAngles(yawDeg, pitchDeg, cfg);
+                    MELEVR::RenderHook::SetHeadLook(look.yaw, look.pitch, true);
+                }
+                else if (g_seedRemYawUU != 0 || g_seedRemPitchUU != 0)
+                {
                     MELEVR::RenderHook::SetHeadLook(-g_seedRemYawUU, g_seedRemPitchUU, true);
+                }
                 else
+                {
                     MELEVR::RenderHook::SetHeadLook(0, 0, false);   // aim owns the rotation - no render-side look on top
+                }
                 headAimApplied = true;
                 aimDriven = true;
             }
@@ -4077,16 +4119,9 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
         {
             if (cfg.headLookEnabled)
             {
-                // Explore free look-around in CalcSceneView (render-side only). Base signs yaw -1, pitch +1; invert +
-                // sensitivity from cfg.
-                const float yawSign = cfg.invertLookYaw ? +1.0f : -1.0f;
-                const float pitchSign = cfg.invertLookPitch ? -1.0f : +1.0f;
-                float dPitchDeg = pitchSign * pitchDeg * cfg.lookSensitivity;
-                if (dPitchDeg > 85.0f) dPitchDeg = 85.0f;
-                if (dPitchDeg < -85.0f) dPitchDeg = -85.0f;
-                MELEVR::RenderHook::SetHeadLook(
-                    static_cast<int32_t>(yawSign * yawDeg * cfg.lookSensitivity * kDegToUU),
-                    static_cast<int32_t>(dPitchDeg * kDegToUU), true);
+                // Explore free look-around in CalcSceneView (render-side only).
+                const HeadLookUU look = HeadLookFromAngles(yawDeg, pitchDeg, cfg);
+                MELEVR::RenderHook::SetHeadLook(look.yaw, look.pitch, true);
                 headLookApplied = true;
             }
             else
