@@ -8,8 +8,8 @@
 // Design doc: docs/STAGE1_CONTROLLER_DESIGN.md (sections 4-6, 9, 11).
 //
 // REVIEW FIXES vs the draft (2026-09-23, new chat):
-//  - A_COUNT: the action table has 28 entries (2 poses + 2x13), not 29 - the
-//    draft's static_assert(==29) did not compile.
+//  - The action table includes the two aim poses, one optional right grip pose,
+//    and the 2x13 button/axis actions.
 //  - Action-state API: OpenXR has xrSyncActions(session, XrActionsSyncInfo*)
 //    and xrGetActionState{Boolean,Float,Vector2f}(session, ...) - there is no
 //    "xrSyncInputs"/"xrUpdateActionState". The draft resolved non-existent
@@ -65,9 +65,10 @@ enum ActionId
     A_L_TRIG, A_L_SQZ, A_L_GRIP, A_L_STICK, A_L_STICKCLK,
     A_L_A, A_L_B, A_L_X, A_L_Y,
     A_L_DU, A_L_DD, A_L_DL, A_L_DR,
+    A_RIGHT_GRIP_POSE,
     A_COUNT
 };
-static_assert(A_COUNT == 28, "action table size (2 poses + 2x13)");
+static_assert(A_COUNT == 29, "action table size (2 aim poses + right grip pose + 2x13)");
 
 struct ActionDef
 {
@@ -112,6 +113,7 @@ constexpr ActionDef kActions[A_COUNT] = {
     { "left_dpad_down",         XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
     { "left_dpad_left",         XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
     { "left_dpad_right",        XR_ACTION_TYPE_BOOLEAN_INPUT_VALUE, nullptr },
+    { "right_grip_pose",        XR_ACTION_TYPE_POSE_INPUT_VALUE,     nullptr },
 };
 static_assert(A_COUNT == (int)(sizeof(kActions) / sizeof(kActions[0])), "kActions table matches the enum");
 
@@ -129,8 +131,9 @@ struct BindingDef
 // draft's invented /user/input/.../gamepad/... paths, these are official 1.0
 // interaction-profile paths.
 constexpr BindingDef kOculusTouchBindings[] = {
-    { A_RIGHT_POSE, "/user/hand/right/input/aim/pose" },
-    { A_LEFT_POSE,  "/user/hand/left/input/aim/pose" },
+    { A_RIGHT_POSE,      "/user/hand/right/input/aim/pose" },
+    { A_RIGHT_GRIP_POSE, "/user/hand/right/input/grip/pose" },
+    { A_LEFT_POSE,       "/user/hand/left/input/aim/pose" },
     { A_R_TRIG,    "/user/hand/right/input/trigger/value" },
     { A_R_SQZ,     "/user/hand/right/input/squeeze/value" },
     { A_R_STICK,   "/user/hand/right/input/thumbstick" },
@@ -173,6 +176,7 @@ XrActionSet   g_actionSet = nullptr;
 XrAction      g_actions[A_COUNT] = {};
 XrPath        g_actionPaths[A_COUNT] = {};
 XrSpace       g_rightSpace = nullptr;
+XrSpace       g_rightGripSpace = nullptr;
 XrSpace       g_leftSpace = nullptr;
 bool          g_sessionReady = false;      // attached + spaces created for g_session
 bool          g_sessionSetupFailed = false; // latch: session-object setup failed this session (log once)
@@ -189,6 +193,15 @@ XrQuaternionf QuatNormalize(const XrQuaternionf& q) noexcept
     XrQuaternionf r = q;
     if (n > 1e-6f) { r.x /= n; r.y /= n; r.z /= n; r.w /= n; }
     return r;
+}
+
+bool QuatNearlyIdentity(const XrQuaternionf& q) noexcept
+{
+    // q and -q represent the same identity rotation. This is deliberately a
+    // strict test: a real aim orientation is allowed to be only a small angle
+    // away from the app-space forward direction.
+    return std::fabs(q.x) < 0.001f && std::fabs(q.y) < 0.001f &&
+           std::fabs(q.z) < 0.001f && std::fabs(std::fabs(q.w) - 1.0f) < 0.001f;
 }
 
 XrQuaternionf QuatSlerp(const XrQuaternionf& a, const XrQuaternionf& b, float t) noexcept
@@ -252,11 +265,12 @@ bool EnsureSessionObjects() noexcept
         return false;
     }
 
-    if (g_rightSpace != nullptr || g_leftSpace != nullptr)   // previous session's spaces
+    if (g_rightSpace != nullptr || g_rightGripSpace != nullptr || g_leftSpace != nullptr)   // previous session's spaces
     {
         if (g_rightSpace != nullptr) g_fn.destroySpace(g_rightSpace);
+        if (g_rightGripSpace != nullptr) g_fn.destroySpace(g_rightGripSpace);
         if (g_leftSpace  != nullptr) g_fn.destroySpace(g_leftSpace);
-        g_rightSpace = g_leftSpace = nullptr;
+        g_rightSpace = g_rightGripSpace = g_leftSpace = nullptr;
     }
     XrActionSpaceCreateInfo sci = {};
     sci.type = XR_TYPE_ACTION_SPACE_CREATE_INFO_VALUE;
@@ -278,8 +292,16 @@ bool EnsureSessionObjects() noexcept
         LogLine("[XRINPUT] xrCreateActionSpace(left) failed");
         return false;
     }
+    sci.action = g_actions[A_RIGHT_GRIP_POSE];
+    if (!XrSucceeded(g_fn.createActionSpace(g_session, &sci, &g_rightGripSpace)))
+    {
+        // Grip is only a compatibility fallback. Do not disable the primary
+        // aim/pose path if this optional action space cannot be created.
+        g_rightGripSpace = nullptr;
+        LogLine("[XRINPUT] xrCreateActionSpace(right grip) failed - aim pose remains primary");
+    }
     g_sessionReady = true;
-    LogLine("[XRINPUT] session objects ready (attach + 2 action spaces)");
+    LogLine("[XRINPUT] session objects ready (attach + aim/grip + left action spaces)");
     return true;
 }
 
@@ -531,6 +553,7 @@ void Shutdown() noexcept
     if (g_fn.destroySpace != nullptr)
     {
         if (g_rightSpace != nullptr) { g_fn.destroySpace(g_rightSpace); g_rightSpace = nullptr; }
+        if (g_rightGripSpace != nullptr) { g_fn.destroySpace(g_rightGripSpace); g_rightGripSpace = nullptr; }
         if (g_leftSpace  != nullptr) { g_fn.destroySpace(g_leftSpace);  g_leftSpace  = nullptr; }
     }
     g_fn = {};
@@ -547,6 +570,7 @@ void SessionInvalidated() noexcept
     if (g_sessionReady)
     {
         if (g_rightSpace != nullptr) { g_fn.destroySpace(g_rightSpace); g_rightSpace = nullptr; }
+        if (g_rightGripSpace != nullptr) { g_fn.destroySpace(g_rightGripSpace); g_rightGripSpace = nullptr; }
         if (g_leftSpace  != nullptr) { g_fn.destroySpace(g_leftSpace);  g_leftSpace  = nullptr; }
         g_sessionReady = false;
         LogLine("[XRINPUT] session ended - action spaces dropped (recreated on next RUNNING)");
@@ -590,6 +614,15 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
     };
     g_frame.rightConnected = locateHand(g_rightSpace, g_frame.right);
     g_frame.leftConnected = locateHand(g_leftSpace, g_frame.left);
+    if (g_rightGripSpace != nullptr)
+    {
+        HandFrame gripFrame = {};
+        if (locateHand(g_rightGripSpace, gripFrame))
+        {
+            g_frame.right.gripPoseValid = true;
+            g_frame.right.gripPoseOrientation = gripFrame.poseOrientation;
+        }
+    }
     if (!g_frame.rightConnected && !g_frame.leftConnected) return;
     g_frame.valid = true;
     if (!g_firstFrameLogged)
@@ -609,7 +642,14 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
     const auto& cfg = MELEVR::Config::Get();
     if (cfg.controllerAim && g_frame.right.poseValid)
     {
-        XrQuaternionf target = g_frame.right.poseOrientation;
+        const bool aimPoseIdentity = QuatNearlyIdentity(g_frame.right.poseOrientation);
+        const bool gripFallbackAvailable = g_frame.right.gripPoseValid &&
+                                           !QuatNearlyIdentity(g_frame.right.gripPoseOrientation);
+        const bool useGripFallback = aimPoseIdentity && gripFallbackAvailable;
+        XrQuaternionf controllerOrientation = useGripFallback
+                                             ? g_frame.right.gripPoseOrientation
+                                             : g_frame.right.poseOrientation;
+        XrQuaternionf target = controllerOrientation;
         if (cfg.controllerAimHeadBlend > 0.001f)
             target = QuatSlerp(headQuat, target, cfg.controllerAimHeadBlend);
         if (!g_aimLatched)
@@ -630,8 +670,8 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
         g_frame.aimValid = true;
 
         // This is intentionally separate from the virtual-pad stick log:
-        // pose orientation is the controller-ray source, while rawR there is
-        // only the optional right thumbstick. Log both the raw pose direction
+        // rawR there is only the optional right thumbstick. Log the primary
+        // aim pose, the optional grip compatibility pose, the selected source,
         // and the post-smoothing direction used by GetAimDeg().
         static uint64_t s_lastAimLogMs = 0;
         const uint64_t nowMs = static_cast<uint64_t>(GetTickCount64());
@@ -639,13 +679,19 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
         {
             float rawYaw = 0.0f, rawPitch = 0.0f;
             QuatYawPitchDeg(g_frame.right.poseOrientation, rawYaw, rawPitch);
+            float gripYaw = 0.0f, gripPitch = 0.0f;
+            if (g_frame.right.gripPoseValid)
+                QuatYawPitchDeg(g_frame.right.gripPoseOrientation, gripYaw, gripPitch);
             float targetYaw = 0.0f, targetPitch = 0.0f;
             QuatYawPitchDeg(target, targetYaw, targetPitch);
             s_lastAimLogMs = nowMs;
             LogLine("[XRINPUT] aim pose rawDeg=(" + std::to_string(rawYaw) + "," +
-                    std::to_string(rawPitch) + ") targetDeg=(" +
-                    std::to_string(targetYaw) + "," + std::to_string(targetPitch) +
-                    ") smoothedDeg=(" + std::to_string(g_frame.aimYawDeg) + "," +
+                    std::to_string(rawPitch) + ") gripDeg=(" +
+                    std::to_string(gripYaw) + "," + std::to_string(gripPitch) +
+                    ") source=" + (useGripFallback ? "grip-fallback" : "aim") +
+                    " targetDeg=(" + std::to_string(targetYaw) + "," +
+                    std::to_string(targetPitch) + ") smoothedDeg=(" +
+                    std::to_string(g_frame.aimYawDeg) + "," +
                     std::to_string(g_frame.aimPitchDeg) + ") pos=(" +
                     std::to_string(g_frame.right.posePosition.x) + "," +
                     std::to_string(g_frame.right.posePosition.y) + "," +

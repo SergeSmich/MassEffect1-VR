@@ -5,8 +5,8 @@
 // draft 2026-09-23, review-corrected 2026-09-23).
 //
 // Owns the OpenXR input side of the mod: one action set, a full "gamepad"
-// mirror of both hands (28 actions: poses, triggers, grips, sticks, face,
-// dpad), per-hand action spaces located against the app space (same space
+// mirror of both hands plus the right grip-pose fallback (29 actions: poses,
+// triggers, grips, sticks, face, dpad), per-hand action spaces located against the app space (same space
 // as the head pose), and per-frame sync/locate/update on the game's render
 // thread.
 //
@@ -58,8 +58,13 @@ namespace MELEVR::XrInput
 struct HandFrame
 {
     bool poseValid = false;
-    MELEVR::Xr::XrQuaternionf poseOrientation = {};   // in app space (same basis as head pose)
-    MELEVR::Xr::XrVector3f    posePosition = {};      // in app space (unused by Stage 1, kept for Stage 2)
+    MELEVR::Xr::XrQuaternionf poseOrientation = {};   // aim/pose in app space (same basis as head pose)
+    MELEVR::Xr::XrVector3f    posePosition = {};      // aim/pose position in app space
+    // Some Virtual Desktop/OpenXR combinations currently return a valid
+    // aim/pose position but an identity aim/pose orientation. Keep the official
+    // right grip pose as a compatibility fallback; aim/pose remains primary.
+    bool gripPoseValid = false;
+    MELEVR::Xr::XrQuaternionf gripPoseOrientation = {};
     float trigger = 0.0f;                 // 0..1
     float squeeze = 0.0f;                 // 0..1
     float stickX = 0.0f;                  // -1..1
