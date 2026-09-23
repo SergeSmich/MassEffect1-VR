@@ -324,20 +324,20 @@ bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getP
 #define TRY_R(name, field) \
     do { if (!resolve(name, reinterpret_cast<void**>(&g_fn.field))) \
         { LogLine(std::string("[XRINPUT] resolve ") + name + " FAILED"); resolveFailed = true; } } while (0)
-    TRY_R("xrStringToPath", stringToPath)
-    TRY_R("xrCreateActionSet", createActionSet)
-    TRY_R("xrDestroyActionSet", destroyActionSet)
-    TRY_R("xrCreateAction", createAction)
-    TRY_R("xrDestroyAction", destroyAction)
-    TRY_R("xrSuggestInteractionProfileBindings", suggestBindings)
-    TRY_R("xrAttachSessionActionSets", attachSets)
-    TRY_R("xrSyncActions", syncActions)
-    TRY_R("xrGetActionStateBoolean", getActionStateBoolean)
-    TRY_R("xrGetActionStateFloat", getActionStateFloat)
-    TRY_R("xrGetActionStateVector2f", getActionStateVector2f)
-    TRY_R("xrCreateActionSpace", createActionSpace)
-    TRY_R("xrLocateSpace", locateSpace)
-    TRY_R("xrDestroySpace", destroySpace)
+    TRY_R("xrStringToPath", stringToPath);
+    TRY_R("xrCreateActionSet", createActionSet);
+    TRY_R("xrDestroyActionSet", destroyActionSet);
+    TRY_R("xrCreateAction", createAction);
+    TRY_R("xrDestroyAction", destroyAction);
+    TRY_R("xrSuggestInteractionProfileBindings", suggestBindings);
+    TRY_R("xrAttachSessionActionSets", attachSets);
+    TRY_R("xrSyncActions", syncActions);
+    TRY_R("xrGetActionStateBoolean", getActionStateBoolean);
+    TRY_R("xrGetActionStateFloat", getActionStateFloat);
+    TRY_R("xrGetActionStateVector2f", getActionStateVector2f);
+    TRY_R("xrCreateActionSpace", createActionSpace);
+    TRY_R("xrLocateSpace", locateSpace);
+    TRY_R("xrDestroySpace", destroySpace);
 #undef TRY_R
 
     if (resolveFailed)
@@ -518,8 +518,11 @@ void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat
         }
         else
         {
-            // frame-rate dependent on purpose (simple + tunable); dt-based in 1.1
-            const float alpha = 1.0f - std::min(0.99f, cfg.controllerAimSmoothing);
+            // frame-rate dependent on purpose (simple + tunable); dt-based in 1.1.
+            // Windows.h may define min as a macro, so avoid std::min here.
+            const float smoothing = (cfg.controllerAimSmoothing < 0.99f)
+                                  ? cfg.controllerAimSmoothing : 0.99f;
+            const float alpha = 1.0f - smoothing;
             g_aimQuat = QuatSlerp(g_aimQuat, target, alpha);
         }
         QuatYawPitchDeg(g_aimQuat, g_frame.aimYawDeg, g_frame.aimPitchDeg);
@@ -594,7 +597,8 @@ bool BuildVirtualGamepad(XINPUT_STATE* state, const MELEVR::Config::VrConfig& cf
         g.sThumbRY = static_cast<SHORT>(ry * 32767.0f);
     }
 
-    state->dwFlags = XINPUT_FLAG_GAMEPAD;
+    // XINPUT_STATE has no dwFlags member; XINPUT_FLAG_GAMEPAD belongs to the
+    // dwFlags argument of XInputGetState, not to the returned state structure.
     return true;   // caller: dwPacketNumber++, return ERROR_SUCCESS from the hook
 }
 

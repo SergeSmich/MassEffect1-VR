@@ -50,14 +50,16 @@ namespace MELEVR::Config { struct VrConfig; }   // fwd (see vr_config.h)
 
 namespace MELEVR::XrInput
 {
-using namespace MELEVR::Xr;   // XrInstance/XrSession/XrSpace/XrTime/XrQuaternionf/...
+// OpenXR names are qualified explicitly below. Do not add a using-directive
+// here: xr_session.h also defines MELEVR::XrSession (the session facade),
+// which would make XrSession ambiguous in translation units that include both.
 
 // ---- published per-frame snapshot ------------------------------------------
 struct HandFrame
 {
     bool poseValid = false;
-    XrQuaternionf poseOrientation = {};   // in app space (same basis as head pose)
-    XrVector3f    posePosition = {};      // in app space (unused by Stage 1, kept for Stage 2)
+    MELEVR::Xr::XrQuaternionf poseOrientation = {};   // in app space (same basis as head pose)
+    MELEVR::Xr::XrVector3f    posePosition = {};      // in app space (unused by Stage 1, kept for Stage 2)
     float trigger = 0.0f;                 // 0..1
     float squeeze = 0.0f;                 // 0..1
     float stickX = 0.0f;                  // -1..1
@@ -87,7 +89,9 @@ struct Frame
 // session's loader handle is file-static in xr_session.cpp).
 // Returns true when the action API resolved and the action set/actions were
 // created (a later tracking failure only invalidates frames, never this).
-bool Init(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAddr getProc) noexcept;
+bool Init(MELEVR::Xr::XrInstance instance,
+          MELEVR::Xr::XrSession session,
+          MELEVR::Xr::PFN_xrGetInstanceProcAddr getProc) noexcept;
 
 // Called from the session state-changed handler when the session leaves RUNNING
 // (STOPPING branch, right after xrEndSession). Session-bound objects (action
@@ -104,7 +108,9 @@ bool IsReady() noexcept;
 // app-space handle (g_appSpace in xr_session.cpp) and the smoothed head
 // quaternion used for the submit tag - the head is needed for the aim
 // head-blend (cfg.controllerAimHeadBlend) and only when controllerAim is on.
-void OnFrame(XrSpace appSpace, XrTime displayTime, const XrQuaternionf& headQuat) noexcept;
+void OnFrame(MELEVR::Xr::XrSpace appSpace,
+             MELEVR::Xr::XrTime displayTime,
+             const MELEVR::Xr::XrQuaternionf& headQuat) noexcept;
 
 // Current published frame (always non-const-valid; check .valid).
 const Frame& GetFrame() noexcept;
