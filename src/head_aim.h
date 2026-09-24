@@ -52,6 +52,11 @@ bool GetCameraModeNameSEH(char* out, int cap) noexcept;
 
 // (GetPawnWorldAndYawSEH + SetCineFpHide removed 2026-07-18 with CINEFP - cine is flat, permanently.)
 
+// Stage 2 discovery, read-only: logs the live pawn/mesh attachment and component
+// graph so the weapon/arms object can be identified before any new write path is
+// considered. No game memory is modified.
+void ProbeWeaponGraph() noexcept;
+
 // Engine game-mode context (USFXGameModeManager::CurrentMode / EGameModes). 7 = GUI full-screen menu.
 // Returns the byte 0..12, or -1 if unreadable. Used to force menus to flat mono in VR. Pure read.
 int ReadGameModeSEH() noexcept;

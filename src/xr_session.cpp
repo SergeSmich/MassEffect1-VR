@@ -3920,6 +3920,11 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
     const bool ctrlLive = ctrlNeeded && MELEVR::HeadAim::EnsureController();
     const bool ctrlStable = ctrlLive && MELEVR::HeadAim::ControllerStable();
 
+    // Stage 2 discovery is read-only. It logs the live Pawn/Mesh attachment graph
+    // when the object topology changes; it never writes game memory.
+    if (ctrlLive)
+        MELEVR::HeadAim::ProbeWeaponGraph();
+
     // RECENTER RE-LATCH: a recenter this frame re-origined the VIEW (g_appSpace) but not the head-aim
     // reference. Strip the accumulated ControlRotation injection now (returns aim to the raw game/stick
     // value) and reset the reference; the head-aim branch below re-activates fresh against the new forward,

@@ -379,6 +379,144 @@ void* ReadPawnMeshSEH(void* pawn) noexcept
     }
 }
 
+struct ObjectLabel
+{
+    char className[96];
+    char objectName[96];
+    char outerName[96];
+};
+
+bool ReadObjectLabelSEH(void* object, ObjectLabel* out) noexcept
+{
+    if (out == nullptr) return false;
+    out->className[0] = '\0';
+    out->objectName[0] = '\0';
+    out->outerName[0] = '\0';
+    if (!PointerLooksCanonicalAligned(object) ||
+        !IsReadableAddress(object, MELEVR::LE1::kUObjectClass + sizeof(void*))) return false;
+    __try
+    {
+        void* classObject = MELEVR::LE1::ReadPtr(object, MELEVR::LE1::kUObjectClass);
+        void* outerObject = MELEVR::LE1::ReadPtr(object, MELEVR::LE1::kUObjectOuter);
+        SafeCopyCString(out->className, sizeof(out->className), MELEVR::LE1::ObjectName(classObject));
+        SafeCopyCString(out->objectName, sizeof(out->objectName), MELEVR::LE1::ObjectName(object));
+        SafeCopyCString(out->outerName, sizeof(out->outerName), MELEVR::LE1::ObjectName(outerObject));
+        return out->className[0] != '\0' || out->objectName[0] != '\0';
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        out->className[0] = '\0';
+        out->objectName[0] = '\0';
+        out->outerName[0] = '\0';
+        return false;
+    }
+}
+
+struct PointerArrayView
+{
+    void* data;
+    std::int32_t count;
+    std::int32_t max;
+};
+
+bool ReadPointerArrayViewSEH(void* owner, std::uintptr_t offset, PointerArrayView* out) noexcept
+{
+    if (out == nullptr) return false;
+    out->data = nullptr;
+    out->count = 0;
+    out->max = 0;
+    if (!PointerLooksCanonicalAligned(owner)) return false;
+    __try
+    {
+        const auto* header = reinterpret_cast<const MELEVR::LE1::TArrayHeader*>(
+            reinterpret_cast<const BYTE*>(owner) + offset);
+        out->data = header->data;
+        out->count = header->count;
+        out->max = header->max;
+        if (out->count < 0 || out->count > 4096 || out->max < out->count || out->max > 1'000'000)
+        {
+            out->data = nullptr;
+            return false;
+        }
+        if (out->count > 0 &&
+            (!PointerLooksCanonicalAligned(out->data) ||
+             !IsReadableAddress(out->data, static_cast<size_t>(out->count) * sizeof(void*))))
+        {
+            out->data = nullptr;
+            return false;
+        }
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        out->data = nullptr;
+        out->count = 0;
+        out->max = 0;
+        return false;
+    }
+}
+
+std::uint64_t PointerArraySignature(const PointerArrayView& view) noexcept
+{
+    if (view.data == nullptr || view.count <= 0) return 0;
+    const int n = (view.count < 128) ? view.count : 128;
+    std::uint64_t hash = 1469598103934665603ull;
+    for (int i = 0; i < n; ++i)
+    {
+        void* object = nullptr;
+        __try { object = reinterpret_cast<void**>(view.data)[i]; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { object = nullptr; }
+        const std::uintptr_t value = reinterpret_cast<std::uintptr_t>(object);
+        hash ^= static_cast<std::uint64_t>(value) + static_cast<std::uint64_t>(i) * 0x9E3779B97F4A7C15ull;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+std::string ObjectPointerText(const void* object) noexcept
+{
+    char text[32] = {};
+    sprintf_s(text, sizeof(text), "%p", object);
+    return text;
+}
+
+void LogWeaponProbeObject(const char* listName, int index, void* object) noexcept
+{
+    ObjectLabel label = {};
+    if (!ReadObjectLabelSEH(object, &label))
+    {
+        LogLine(std::string("[WEAPONPROBE] ") + listName + "[" + std::to_string(index) +
+                "] ptr=" + ObjectPointerText(object) + " unreadable");
+        return;
+    }
+    LogLine(std::string("[WEAPONPROBE] ") + listName + "[" + std::to_string(index) +
+            "] ptr=" + ObjectPointerText(object) +
+            " class='" + label.className + "' name='" + label.objectName +
+            "' outer='" + label.outerName + "'");
+}
+
+void LogWeaponProbeArray(const char* listName, void* owner, std::uintptr_t offset,
+                         int maxEntries) noexcept
+{
+    PointerArrayView view = {};
+    if (!ReadPointerArrayViewSEH(owner, offset, &view))
+    {
+        LogLine(std::string("[WEAPONPROBE] ") + listName + " unreadable");
+        return;
+    }
+    LogLine(std::string("[WEAPONPROBE] ") + listName + " count=" +
+            std::to_string(view.count) + " max=" + std::to_string(view.max));
+    const int n = (view.count < maxEntries) ? view.count : maxEntries;
+    for (int i = 0; i < n; ++i)
+    {
+        void* object = nullptr;
+        __try { object = reinterpret_cast<void**>(view.data)[i]; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { object = nullptr; }
+        if (PointerLooksCanonicalAligned(object))
+            LogWeaponProbeObject(listName, i, object);
+    }
+}
+
 // In-cover from the possessed pawn's cover-state flag (0xA54; CoverType|CoverAction byte non-zero).
 // Cover reuses the SAME Combat/TightAim mode object as open combat, so the mode NAME can't tell them
 // apart - this pawn flag is the only reliable "hugging a wall" signal. Pure read, SEH-guarded.
@@ -1063,6 +1201,78 @@ bool EnsureController() noexcept
     g_controllerIndex = -1;
     g_controllerWasLost = true;   // tripwire: quarantine the next controller found
     return false;
+}
+
+void ProbeWeaponGraph() noexcept
+{
+    if (!EnsureController() || g_controller == nullptr) return;
+
+    static bool s_logged = false;
+    static void* s_lastController = nullptr;
+    static void* s_lastPawn = nullptr;
+    static void* s_lastMesh = nullptr;
+    static int s_lastAttachedCount = -1;
+    static int s_lastComponentsCount = -1;
+    static int s_lastAllComponentsCount = -1;
+    static std::uint64_t s_lastAttachedSignature = 0;
+    static std::uint64_t s_lastComponentsSignature = 0;
+    static std::uint64_t s_lastAllComponentsSignature = 0;
+
+    void* pawn = ReadPossessedPawnSEH(g_controller);
+    void* mesh = ReadPawnMeshSEH(pawn);
+    PointerArrayView attached = {};
+    PointerArrayView components = {};
+    PointerArrayView allComponents = {};
+    const bool attachedOk = ReadPointerArrayViewSEH(pawn, MELEVR::LE1::kActorAttached, &attached);
+    const bool componentsOk = ReadPointerArrayViewSEH(pawn, MELEVR::LE1::kActorComponents, &components);
+    const bool allComponentsOk = ReadPointerArrayViewSEH(pawn, MELEVR::LE1::kActorAllComponents, &allComponents);
+    const int attachedCount = attachedOk ? attached.count : -1;
+    const int componentsCount = componentsOk ? components.count : -1;
+    const int allComponentsCount = allComponentsOk ? allComponents.count : -1;
+    const std::uint64_t attachedSignature = attachedOk ? PointerArraySignature(attached) : 0;
+    const std::uint64_t componentsSignature = componentsOk ? PointerArraySignature(components) : 0;
+    const std::uint64_t allComponentsSignature = allComponentsOk ? PointerArraySignature(allComponents) : 0;
+
+    const bool changed = !s_logged || s_lastController != g_controller || s_lastPawn != pawn ||
+                         s_lastMesh != mesh || s_lastAttachedCount != attachedCount ||
+                         s_lastComponentsCount != componentsCount ||
+                         s_lastAllComponentsCount != allComponentsCount ||
+                         s_lastAttachedSignature != attachedSignature ||
+                         s_lastComponentsSignature != componentsSignature ||
+                         s_lastAllComponentsSignature != allComponentsSignature;
+    if (!changed) return;
+
+    s_logged = true;
+    s_lastController = g_controller;
+    s_lastPawn = pawn;
+    s_lastMesh = mesh;
+    s_lastAttachedCount = attachedCount;
+    s_lastComponentsCount = componentsCount;
+    s_lastAllComponentsCount = allComponentsCount;
+    s_lastAttachedSignature = attachedSignature;
+    s_lastComponentsSignature = componentsSignature;
+    s_lastAllComponentsSignature = allComponentsSignature;
+
+    LogLine(std::string("[WEAPONPROBE] graph changed controller=") + ObjectPointerText(g_controller) +
+            " pawn=" + ObjectPointerText(pawn) + " mesh=" + ObjectPointerText(mesh));
+    LogWeaponProbeObject("controller", 0, g_controller);
+    LogWeaponProbeObject("pawn", 0, pawn);
+    LogWeaponProbeObject("mesh", 0, mesh);
+    LogWeaponProbeArray("pawn.attached", pawn, MELEVR::LE1::kActorAttached, 64);
+    LogWeaponProbeArray("pawn.components", pawn, MELEVR::LE1::kActorComponents, 64);
+    LogWeaponProbeArray("pawn.allComponents", pawn, MELEVR::LE1::kActorAllComponents, 64);
+
+    PointerArrayView meshAttachments = {};
+    if (ReadPointerArrayViewSEH(mesh, MELEVR::LE1::kSkelMeshAttachments, &meshAttachments))
+    {
+        LogLine(std::string("[WEAPONPROBE] mesh.attachments count=") +
+                std::to_string(meshAttachments.count) + " max=" + std::to_string(meshAttachments.max) +
+                " (FAttachment layout intentionally not guessed)");
+    }
+    else
+    {
+        LogLine("[WEAPONPROBE] mesh.attachments unreadable");
+    }
 }
 
 bool ControllerStable() noexcept
