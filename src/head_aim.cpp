@@ -549,6 +549,14 @@ void LogWeaponProbeArray(const char* listName, void* owner, std::uintptr_t offse
     }
 }
 
+void LogWeaponProbeActorChildren(void* weaponActor) noexcept
+{
+    if (!PointerLooksCanonicalAligned(weaponActor)) return;
+    LogWeaponProbeArray("weapon.actor.attached", weaponActor, MELEVR::LE1::kActorAttached, 32);
+    LogWeaponProbeArray("weapon.actor.components", weaponActor, MELEVR::LE1::kActorComponents, 32);
+    LogWeaponProbeArray("weapon.actor.allComponents", weaponActor, MELEVR::LE1::kActorAllComponents, 32);
+}
+
 void LogWeaponProbeWeaponCandidates(const PointerArrayView& components) noexcept
 {
     if (components.data == nullptr || components.count <= 0) return;
@@ -590,6 +598,7 @@ void LogWeaponProbeWeaponCandidates(const PointerArrayView& components) noexcept
             if (loggedActorCount < kMaxLoggedActors)
                 loggedActors[loggedActorCount++] = weaponActor;
             LogWeaponProbeObject("weapon.actor", 0, weaponActor);
+            LogWeaponProbeActorChildren(weaponActor);
         }
     }
 }
