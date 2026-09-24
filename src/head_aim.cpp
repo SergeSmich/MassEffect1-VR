@@ -594,6 +594,22 @@ void LogWeaponProbeActorState(void* weaponActor) noexcept
             std::to_string(state.yawUU) + "," + std::to_string(state.rollUU) + ")");
 }
 
+void LogWeaponProbeComponentAttachments(void* component) noexcept
+{
+    PointerArrayView attachments = {};
+    if (!ReadPointerArrayViewSEH(component, MELEVR::LE1::kSkelMeshAttachments, &attachments))
+    {
+        LogLine(std::string("[WEAPONPROBE] weapon.component.attachments component=") +
+                ObjectPointerText(component) + " unreadable");
+        return;
+    }
+    LogLine(std::string("[WEAPONPROBE] weapon.component.attachments component=") +
+            ObjectPointerText(component) + " data=" + ObjectPointerText(attachments.data) +
+            " count=" + std::to_string(attachments.count) +
+            " max=" + std::to_string(attachments.max) +
+            " (FAttachment layout intentionally not guessed)");
+}
+
 void LogWeaponProbeActorChildren(void* weaponActor) noexcept
 {
     if (!PointerLooksCanonicalAligned(weaponActor)) return;
@@ -678,6 +694,7 @@ void LogWeaponProbeWeaponCandidates(const PointerArrayView& components) noexcept
                 std::to_string(candidate.index) + " component=" + ObjectPointerText(candidate.component) +
                 " outer=" + ObjectPointerText(candidate.actor));
         LogWeaponProbeObject("weapon.component", candidate.index, candidate.component);
+        LogWeaponProbeComponentAttachments(candidate.component);
 
         bool alreadyLogged = false;
         for (int j = 0; j < loggedActorCount; ++j)
