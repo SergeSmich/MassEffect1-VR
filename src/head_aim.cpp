@@ -549,56 +549,150 @@ void LogWeaponProbeArray(const char* listName, void* owner, std::uintptr_t offse
     }
 }
 
+struct WeaponActorState
+{
+    float locationX;
+    float locationY;
+    float locationZ;
+    std::int32_t pitchUU;
+    std::int32_t yawUU;
+    std::int32_t rollUU;
+};
+
+bool ReadWeaponActorStateSEH(void* weaponActor, WeaponActorState* out) noexcept
+{
+    if (out == nullptr || !PointerLooksCanonicalAligned(weaponActor)) return false;
+    __try
+    {
+        out->locationX = MELEVR::LE1::ReadF32(weaponActor, MELEVR::LE1::kActorLocation + 0);
+        out->locationY = MELEVR::LE1::ReadF32(weaponActor, MELEVR::LE1::kActorLocation + 4);
+        out->locationZ = MELEVR::LE1::ReadF32(weaponActor, MELEVR::LE1::kActorLocation + 8);
+        out->pitchUU = MELEVR::LE1::ReadI32(weaponActor, MELEVR::LE1::kActorRotation + MELEVR::LE1::kRotPitch);
+        out->yawUU = MELEVR::LE1::ReadI32(weaponActor, MELEVR::LE1::kActorRotation + MELEVR::LE1::kRotYaw);
+        out->rollUU = MELEVR::LE1::ReadI32(weaponActor, MELEVR::LE1::kActorRotation + MELEVR::LE1::kRotRoll);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+
+void LogWeaponProbeActorState(void* weaponActor) noexcept
+{
+    WeaponActorState state = {};
+    if (!ReadWeaponActorStateSEH(weaponActor, &state))
+    {
+        LogLine(std::string("[WEAPONPROBE] weapon.actor.state ptr=") +
+                ObjectPointerText(weaponActor) + " unreadable");
+        return;
+    }
+    LogLine(std::string("[WEAPONPROBE] weapon.actor.state ptr=") + ObjectPointerText(weaponActor) +
+            " location=(" + std::to_string(state.locationX) + "," +
+            std::to_string(state.locationY) + "," + std::to_string(state.locationZ) + ")" +
+            " rotationUU=(" + std::to_string(state.pitchUU) + "," +
+            std::to_string(state.yawUU) + "," + std::to_string(state.rollUU) + ")");
+}
+
 void LogWeaponProbeActorChildren(void* weaponActor) noexcept
 {
     if (!PointerLooksCanonicalAligned(weaponActor)) return;
+    LogWeaponProbeActorState(weaponActor);
     LogWeaponProbeArray("weapon.actor.attached", weaponActor, MELEVR::LE1::kActorAttached, 32);
     LogWeaponProbeArray("weapon.actor.components", weaponActor, MELEVR::LE1::kActorComponents, 32);
     LogWeaponProbeArray("weapon.actor.allComponents", weaponActor, MELEVR::LE1::kActorAllComponents, 32);
 }
 
+struct WeaponProbeCandidate
+{
+    void* component;
+    void* actor;
+    int index;
+    bool outerReadable;
+};
+
 void LogWeaponProbeWeaponCandidates(const PointerArrayView& components) noexcept
 {
-    if (components.data == nullptr || components.count <= 0) return;
-    const int n = (components.count < 128) ? components.count : 128;
-    void* loggedActors[16] = {};
-    int loggedActorCount = 0;
-    constexpr int kMaxLoggedActors = static_cast<int>(sizeof(loggedActors) / sizeof(loggedActors[0]));
-    for (int i = 0; i < n; ++i)
+    constexpr int kMaxCandidates = 64;
+    static WeaponProbeCandidate s_lastCandidates[kMaxCandidates] = {};
+    static int s_lastCandidateCount = -1;
+
+    WeaponProbeCandidate candidates[kMaxCandidates] = {};
+    int candidateCount = 0;
+    if (components.data != nullptr && components.count > 0)
     {
-        void* component = nullptr;
-        if (!ReadPointerArrayElementSEH(components.data, i, &component) ||
-            !PointerLooksCanonicalAligned(component))
-            continue;
+        const int n = (components.count < 128) ? components.count : 128;
+        for (int i = 0; i < n && candidateCount < kMaxCandidates; ++i)
+        {
+            void* component = nullptr;
+            if (!ReadPointerArrayElementSEH(components.data, i, &component) ||
+                !PointerLooksCanonicalAligned(component))
+                continue;
 
-        ObjectLabel label = {};
-        if (!ReadObjectLabelSEH(component, &label) ||
-            std::strcmp(label.className, "SkeletalMeshComponent") != 0 ||
-            std::strcmp(label.outerName, "BioWeaponRanged") != 0)
-            continue;
+            ObjectLabel label = {};
+            if (!ReadObjectLabelSEH(component, &label) ||
+                std::strcmp(label.className, "SkeletalMeshComponent") != 0 ||
+                std::strcmp(label.outerName, "BioWeaponRanged") != 0)
+                continue;
 
-        void* weaponActor = nullptr;
-        const bool outerReadable = ReadObjectOuterSEH(component, &weaponActor);
+            WeaponProbeCandidate& candidate = candidates[candidateCount++];
+            candidate.component = component;
+            candidate.index = i;
+            candidate.outerReadable = ReadObjectOuterSEH(component, &candidate.actor);
+        }
+    }
+
+    bool changed = candidateCount != s_lastCandidateCount;
+    if (!changed)
+    {
+        for (int i = 0; i < candidateCount; ++i)
+        {
+            if (candidates[i].component != s_lastCandidates[i].component ||
+                candidates[i].actor != s_lastCandidates[i].actor ||
+                candidates[i].index != s_lastCandidates[i].index ||
+                candidates[i].outerReadable != s_lastCandidates[i].outerReadable)
+            {
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (!changed) return;
+
+    s_lastCandidateCount = candidateCount;
+    for (int i = 0; i < candidateCount; ++i)
+        s_lastCandidates[i] = candidates[i];
+
+    if (candidateCount == 0)
+    {
+        LogLine("[WEAPONPROBE] weapon candidates count=0");
+        return;
+    }
+
+    void* loggedActors[kMaxCandidates] = {};
+    int loggedActorCount = 0;
+    for (int i = 0; i < candidateCount; ++i)
+    {
+        const WeaponProbeCandidate& candidate = candidates[i];
         LogLine(std::string("[WEAPONPROBE] weapon component candidate index=") +
-                std::to_string(i) + " component=" + ObjectPointerText(component) +
-                " outer=" + ObjectPointerText(weaponActor));
-        LogWeaponProbeObject("weapon.component", i, component);
+                std::to_string(candidate.index) + " component=" + ObjectPointerText(candidate.component) +
+                " outer=" + ObjectPointerText(candidate.actor));
+        LogWeaponProbeObject("weapon.component", candidate.index, candidate.component);
 
         bool alreadyLogged = false;
         for (int j = 0; j < loggedActorCount; ++j)
         {
-            if (loggedActors[j] == weaponActor)
+            if (loggedActors[j] == candidate.actor)
             {
                 alreadyLogged = true;
                 break;
             }
         }
-        if (!alreadyLogged && outerReadable && PointerLooksCanonicalAligned(weaponActor))
+        if (!alreadyLogged && candidate.outerReadable && PointerLooksCanonicalAligned(candidate.actor))
         {
-            if (loggedActorCount < kMaxLoggedActors)
-                loggedActors[loggedActorCount++] = weaponActor;
-            LogWeaponProbeObject("weapon.actor", 0, weaponActor);
-            LogWeaponProbeActorChildren(weaponActor);
+            loggedActors[loggedActorCount++] = candidate.actor;
+            LogWeaponProbeObject("weapon.actor", 0, candidate.actor);
+            LogWeaponProbeActorChildren(candidate.actor);
         }
     }
 }
