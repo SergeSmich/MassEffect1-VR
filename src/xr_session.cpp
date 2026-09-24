@@ -3923,7 +3923,15 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
     // Stage 2 discovery is read-only. It logs the live Pawn/Mesh attachment graph
     // when the object topology changes; it never writes game memory.
     if (ctrlLive)
+    {
+        static bool s_weaponProbeDispatchLogged = false;
+        if (!s_weaponProbeDispatchLogged)
+        {
+            s_weaponProbeDispatchLogged = true;
+            LogLine("[WEAPONPROBE] dispatcher active");
+        }
         MELEVR::HeadAim::ProbeWeaponGraph();
+    }
 
     // RECENTER RE-LATCH: a recenter this frame re-origined the VIEW (g_appSpace) but not the head-aim
     // reference. Strip the accumulated ControlRotation injection now (returns aim to the raw game/stick
