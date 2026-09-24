@@ -4207,8 +4207,8 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
         // No valid head pose: hold still. Release any in-flight aim injection (controller-verified).
         if (g_headAimActive)
         {
-            const bool ctrlLive = MELEVR::HeadAim::EnsureController();
-            ReleaseHeadAim(ctrlLive && MELEVR::HeadAim::ControllerStable());
+            const bool controllerStillLive = MELEVR::HeadAim::EnsureController();
+            ReleaseHeadAim(controllerStillLive && MELEVR::HeadAim::ControllerStable());
         }
         MELEVR::RenderHook::SetHeadLook(0, 0, false);
     }

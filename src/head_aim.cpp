@@ -456,6 +456,23 @@ bool ReadPointerArrayViewSEH(void* owner, std::uintptr_t offset, PointerArrayVie
     }
 }
 
+bool ReadPointerArrayElementSEH(void* data, int index, void** out) noexcept
+{
+    if (out == nullptr) return false;
+    *out = nullptr;
+    if (!PointerLooksCanonicalAligned(data) || index < 0) return false;
+    __try
+    {
+        *out = reinterpret_cast<void**>(data)[index];
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        *out = nullptr;
+        return false;
+    }
+}
+
 std::uint64_t PointerArraySignature(const PointerArrayView& view) noexcept
 {
     if (view.data == nullptr || view.count <= 0) return 0;
@@ -464,8 +481,7 @@ std::uint64_t PointerArraySignature(const PointerArrayView& view) noexcept
     for (int i = 0; i < n; ++i)
     {
         void* object = nullptr;
-        __try { object = reinterpret_cast<void**>(view.data)[i]; }
-        __except (EXCEPTION_EXECUTE_HANDLER) { object = nullptr; }
+        ReadPointerArrayElementSEH(view.data, i, &object);
         const std::uintptr_t value = reinterpret_cast<std::uintptr_t>(object);
         hash ^= static_cast<std::uint64_t>(value) + static_cast<std::uint64_t>(i) * 0x9E3779B97F4A7C15ull;
         hash *= 1099511628211ull;
@@ -510,9 +526,8 @@ void LogWeaponProbeArray(const char* listName, void* owner, std::uintptr_t offse
     for (int i = 0; i < n; ++i)
     {
         void* object = nullptr;
-        __try { object = reinterpret_cast<void**>(view.data)[i]; }
-        __except (EXCEPTION_EXECUTE_HANDLER) { object = nullptr; }
-        if (PointerLooksCanonicalAligned(object))
+        if (ReadPointerArrayElementSEH(view.data, i, &object) &&
+            PointerLooksCanonicalAligned(object))
             LogWeaponProbeObject(listName, i, object);
     }
 }
