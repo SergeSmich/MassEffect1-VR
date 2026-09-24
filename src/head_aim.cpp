@@ -412,6 +412,23 @@ bool ReadObjectLabelSEH(void* object, ObjectLabel* out) noexcept
     }
 }
 
+bool ReadObjectOuterSEH(void* object, void** out) noexcept
+{
+    if (out == nullptr) return false;
+    *out = nullptr;
+    if (!PointerLooksCanonicalAligned(object)) return false;
+    __try
+    {
+        *out = MELEVR::LE1::ReadPtr(object, MELEVR::LE1::kUObjectOuter);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        *out = nullptr;
+        return false;
+    }
+}
+
 struct PointerArrayView
 {
     void* data;
@@ -529,6 +546,51 @@ void LogWeaponProbeArray(const char* listName, void* owner, std::uintptr_t offse
         if (ReadPointerArrayElementSEH(view.data, i, &object) &&
             PointerLooksCanonicalAligned(object))
             LogWeaponProbeObject(listName, i, object);
+    }
+}
+
+void LogWeaponProbeWeaponCandidates(const PointerArrayView& components) noexcept
+{
+    if (components.data == nullptr || components.count <= 0) return;
+    const int n = (components.count < 128) ? components.count : 128;
+    void* loggedActors[16] = {};
+    int loggedActorCount = 0;
+    constexpr int kMaxLoggedActors = static_cast<int>(sizeof(loggedActors) / sizeof(loggedActors[0]));
+    for (int i = 0; i < n; ++i)
+    {
+        void* component = nullptr;
+        if (!ReadPointerArrayElementSEH(components.data, i, &component) ||
+            !PointerLooksCanonicalAligned(component))
+            continue;
+
+        ObjectLabel label = {};
+        if (!ReadObjectLabelSEH(component, &label) ||
+            std::strcmp(label.className, "SkeletalMeshComponent") != 0 ||
+            std::strcmp(label.outerName, "BioWeaponRanged") != 0)
+            continue;
+
+        void* weaponActor = nullptr;
+        const bool outerReadable = ReadObjectOuterSEH(component, &weaponActor);
+        LogLine(std::string("[WEAPONPROBE] weapon component candidate index=") +
+                std::to_string(i) + " component=" + ObjectPointerText(component) +
+                " outer=" + ObjectPointerText(weaponActor));
+        LogWeaponProbeObject("weapon.component", i, component);
+
+        bool alreadyLogged = false;
+        for (int j = 0; j < loggedActorCount; ++j)
+        {
+            if (loggedActors[j] == weaponActor)
+            {
+                alreadyLogged = true;
+                break;
+            }
+        }
+        if (!alreadyLogged && outerReadable && PointerLooksCanonicalAligned(weaponActor))
+        {
+            if (loggedActorCount < kMaxLoggedActors)
+                loggedActors[loggedActorCount++] = weaponActor;
+            LogWeaponProbeObject("weapon.actor", 0, weaponActor);
+        }
     }
 }
 
@@ -1276,6 +1338,7 @@ void ProbeWeaponGraph() noexcept
     LogWeaponProbeArray("pawn.attached", pawn, MELEVR::LE1::kActorAttached, 64);
     LogWeaponProbeArray("pawn.components", pawn, MELEVR::LE1::kActorComponents, 64);
     LogWeaponProbeArray("pawn.allComponents", pawn, MELEVR::LE1::kActorAllComponents, 64);
+    LogWeaponProbeWeaponCandidates(allComponents);
 
     PointerArrayView meshAttachments = {};
     if (ReadPointerArrayViewSEH(mesh, MELEVR::LE1::kSkelMeshAttachments, &meshAttachments))
