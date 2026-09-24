@@ -3915,8 +3915,8 @@ void RunFrame(IDXGISwapChain* gameSwapChain) noexcept
     // Controller gates computed ONCE per frame (ControllerStable mutates quarantine state - must not
     // run twice), shared by head-aim, its release, and the first-person tick. Zero traffic when nothing
     // needs it.
-    const bool ctrlNeeded = cfg.combatHeadAim || g_headAimActive ||
-                            cfg.fpEnabled || MELEVR::HeadAim::FirstPersonOwnsAny();
+    const bool ctrlNeeded = cfg.combatHeadAim || cfg.controllerInput || cfg.controllerAim ||
+                            g_headAimActive || cfg.fpEnabled || MELEVR::HeadAim::FirstPersonOwnsAny();
     const bool ctrlLive = ctrlNeeded && MELEVR::HeadAim::EnsureController();
     const bool ctrlStable = ctrlLive && MELEVR::HeadAim::ControllerStable();
 
