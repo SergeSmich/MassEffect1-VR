@@ -610,8 +610,90 @@ void LogWeaponProbeComponentAttachments(void* component) noexcept
             " (FAttachment layout intentionally not guessed)");
 }
 
-void LogWeaponProbeActorChildren(void* weaponActor) noexcept
+// Differentially confirmed read-only observations in the live FAttachment data:
+// data+0xD0 contains a pointer that tracks the selected BioWeaponRanged component;
+// data+0xE0..data+0xF7 is a separate 24-byte draw/holster state block. Keep these
+// as raw observed offsets rather than presenting them as a final FAttachment
+// struct/stride until a third weapon and/or class metadata confirms the layout.
+constexpr std::uintptr_t kObservedAttachmentSelectedPointer = 0xD0;
+constexpr std::uintptr_t kObservedAttachmentDrawState = 0xE0;
+constexpr size_t kObservedAttachmentDrawStateBytes = 24;
+
+void LogWeaponProbeAttachmentSelection(const PointerArrayView& attachments) noexcept
 {
+    void* selectedComponent = nullptr;
+    BYTE drawState[kObservedAttachmentDrawStateBytes] = {};
+    bool readable = false;
+    if (attachments.data != nullptr && attachments.count > 0)
+    {
+        const auto* base = reinterpret_cast<const BYTE*>(attachments.data);
+        __try
+        {
+            if (IsReadableAddress(base + kObservedAttachmentSelectedPointer, sizeof(void*)) &&
+                IsReadableAddress(base + kObservedAttachmentDrawState, kObservedAttachmentDrawStateBytes))
+            {
+                std::memcpy(&selectedComponent, base + kObservedAttachmentSelectedPointer,
+                            sizeof(selectedComponent));
+                std::memcpy(drawState, base + kObservedAttachmentDrawState,
+                            kObservedAttachmentDrawStateBytes);
+                readable = true;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            readable = false;
+            selectedComponent = nullptr;
+            std::memset(drawState, 0, sizeof(drawState));
+        }
+    }
+
+    static bool s_havePrevious = false;
+    static void* s_previousData = nullptr;
+    static std::int32_t s_previousCount = -1;
+    static std::int32_t s_previousMax = -1;
+    static void* s_previousSelectedComponent = nullptr;
+    static BYTE s_previousDrawState[kObservedAttachmentDrawStateBytes] = {};
+    static bool s_previousReadable = false;
+
+    const bool changed = !s_havePrevious ||
+                         s_previousData != attachments.data ||
+                         s_previousCount != attachments.count ||
+                         s_previousMax != attachments.max ||
+                         s_previousSelectedComponent != selectedComponent ||
+                         s_previousReadable != readable ||
+                         std::memcmp(s_previousDrawState, drawState,
+                                     kObservedAttachmentDrawStateBytes) != 0;
+    if (!changed) return;
+
+    s_havePrevious = true;
+    s_previousData = attachments.data;
+    s_previousCount = attachments.count;
+    s_previousMax = attachments.max;
+    s_previousSelectedComponent = selectedComponent;
+    s_previousReadable = readable;
+    std::memcpy(s_previousDrawState, drawState, sizeof(s_previousDrawState));
+
+    std::string stateBytes;
+    char byteText[4] = {};
+    for (size_t i = 0; i < kObservedAttachmentDrawStateBytes; ++i)
+    {
+        if (i != 0) stateBytes += ' ';
+        sprintf_s(byteText, sizeof(byteText), "%02X", drawState[i]);
+        stateBytes += byteText;
+    }
+
+    LogLine(std::string("[WEAPONPROBE] mesh.attachments.selection data=") +
+            ObjectPointerText(attachments.data) + " count=" + std::to_string(attachments.count) +
+            " max=" + std::to_string(attachments.max) +
+            " readable=" + (readable ? "1" : "0") +
+            " selectedComponent=" + ObjectPointerText(selectedComponent) +
+            " drawState[24]=" + stateBytes);
+    if (readable && PointerLooksCanonicalAligned(selectedComponent))
+        LogWeaponProbeObject("selected.weapon.component", 0, selectedComponent);
+}
+
+void LogWeaponProbeActorChildren(void* weaponActor) noexcept
+
     if (!PointerLooksCanonicalAligned(weaponActor)) return;
     LogWeaponProbeActorState(weaponActor);
     LogWeaponProbeArray("weapon.actor.attached", weaponActor, MELEVR::LE1::kActorAttached, 32);
@@ -1430,6 +1512,15 @@ void ProbeWeaponGraph() noexcept
     const std::uint64_t componentsSignature = componentsOk ? PointerArraySignature(components) : 0;
     const std::uint64_t allComponentsSignature = allComponentsOk ? PointerArraySignature(allComponents) : 0;
 
+    PointerArrayView meshAttachments = {};
+    const bool meshAttachmentsOk =
+        ReadPointerArrayViewSEH(mesh, MELEVR::LE1::kSkelMeshAttachments, &meshAttachments);
+    // This logger has its own differential state, so it must run even when the
+    // broader object-topology signature is unchanged (weapon switches preserve
+    // the array itself while changing the observed selected-component pointer).
+    if (meshAttachmentsOk)
+        LogWeaponProbeAttachmentSelection(meshAttachments);
+
     const bool changed = !s_logged || s_lastController != g_controller || s_lastPawn != pawn ||
                          s_lastMesh != mesh || s_lastAttachedCount != attachedCount ||
                          s_lastComponentsCount != componentsCount ||
@@ -1460,8 +1551,7 @@ void ProbeWeaponGraph() noexcept
     LogWeaponProbeArray("pawn.allComponents", pawn, MELEVR::LE1::kActorAllComponents, 64);
     LogWeaponProbeWeaponCandidates(allComponents);
 
-    PointerArrayView meshAttachments = {};
-    if (ReadPointerArrayViewSEH(mesh, MELEVR::LE1::kSkelMeshAttachments, &meshAttachments))
+    if (meshAttachmentsOk)
     {
         LogLine(std::string("[WEAPONPROBE] mesh.attachments count=") +
                 std::to_string(meshAttachments.count) + " max=" + std::to_string(meshAttachments.max) +
