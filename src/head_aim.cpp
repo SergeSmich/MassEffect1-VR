@@ -619,33 +619,44 @@ constexpr std::uintptr_t kObservedAttachmentSelectedPointer = 0xD0;
 constexpr std::uintptr_t kObservedAttachmentDrawState = 0xE0;
 constexpr size_t kObservedAttachmentDrawStateBytes = 24;
 
+bool ReadWeaponProbeAttachmentSelectionSEH(const PointerArrayView& attachments,
+                                             void** selectedOut,
+                                             BYTE* drawStateOut) noexcept
+{
+    if (selectedOut == nullptr || drawStateOut == nullptr)
+        return false;
+
+    *selectedOut = nullptr;
+    std::memset(drawStateOut, 0, kObservedAttachmentDrawStateBytes);
+    if (attachments.data == nullptr || attachments.count <= 0)
+        return false;
+
+    const auto* base = reinterpret_cast<const BYTE*>(attachments.data);
+    __try
+    {
+        if (!IsReadableAddress(base + kObservedAttachmentSelectedPointer, sizeof(void*)) ||
+            !IsReadableAddress(base + kObservedAttachmentDrawState, kObservedAttachmentDrawStateBytes))
+            return false;
+
+        std::memcpy(selectedOut, base + kObservedAttachmentSelectedPointer, sizeof(*selectedOut));
+        std::memcpy(drawStateOut, base + kObservedAttachmentDrawState,
+                    kObservedAttachmentDrawStateBytes);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        *selectedOut = nullptr;
+        std::memset(drawStateOut, 0, kObservedAttachmentDrawStateBytes);
+        return false;
+    }
+}
+
 void LogWeaponProbeAttachmentSelection(const PointerArrayView& attachments) noexcept
 {
     void* selectedComponent = nullptr;
     BYTE drawState[kObservedAttachmentDrawStateBytes] = {};
-    bool readable = false;
-    if (attachments.data != nullptr && attachments.count > 0)
-    {
-        const auto* base = reinterpret_cast<const BYTE*>(attachments.data);
-        __try
-        {
-            if (IsReadableAddress(base + kObservedAttachmentSelectedPointer, sizeof(void*)) &&
-                IsReadableAddress(base + kObservedAttachmentDrawState, kObservedAttachmentDrawStateBytes))
-            {
-                std::memcpy(&selectedComponent, base + kObservedAttachmentSelectedPointer,
-                            sizeof(selectedComponent));
-                std::memcpy(drawState, base + kObservedAttachmentDrawState,
-                            kObservedAttachmentDrawStateBytes);
-                readable = true;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            readable = false;
-            selectedComponent = nullptr;
-            std::memset(drawState, 0, sizeof(drawState));
-        }
-    }
+    const bool readable = ReadWeaponProbeAttachmentSelectionSEH(
+        attachments, &selectedComponent, drawState);
 
     static bool s_havePrevious = false;
     static void* s_previousData = nullptr;
@@ -693,7 +704,7 @@ void LogWeaponProbeAttachmentSelection(const PointerArrayView& attachments) noex
 }
 
 void LogWeaponProbeActorChildren(void* weaponActor) noexcept
-
+{
     if (!PointerLooksCanonicalAligned(weaponActor)) return;
     LogWeaponProbeActorState(weaponActor);
     LogWeaponProbeArray("weapon.actor.attached", weaponActor, MELEVR::LE1::kActorAttached, 32);
